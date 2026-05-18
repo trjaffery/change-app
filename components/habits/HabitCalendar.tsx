@@ -49,7 +49,9 @@ function getDateRange(mode: ViewMode): { start: string; end: string; dates: stri
 
 function cellOpacity(count: number, goalValue: number): number {
   if (count === 0) return 0;
-  return Math.min(1, count / goalValue);
+  // Linear scale from 0.1 (1 completion) to 1.0 (at or above goal)
+  const ratio = Math.min(1, count / goalValue);
+  return 0.1 + ratio * 0.9;
 }
 
 export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number }) {
@@ -132,7 +134,7 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
                           background: count > 0
                             ? `${habit.color}`
                             : 'rgba(255,255,255,0.05)',
-                          opacity: count > 0 ? Math.max(0.15, opacity) : isFuture ? 0.2 : 0.5,
+                          opacity: count > 0 ? opacity : isFuture ? 0.2 : 0.5,
                         }}
                       />
                     );
