@@ -9,6 +9,7 @@ function toDateStr(d: Date) {
 export async function POST() {
   if (!process.env.GOOGLE_API_KEY) return NextResponse.json({ error: 'GOOGLE_API_KEY not set' }, { status: 500 });
 
+  try {
   const sb = supabaseServer();
   const today = toDateStr(new Date());
   const yesterday = toDateStr(new Date(Date.now() - 86400000));
@@ -63,4 +64,9 @@ export async function POST() {
   );
 
   return NextResponse.json({ briefing });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[briefing] error:', msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
