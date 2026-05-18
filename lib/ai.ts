@@ -1,4 +1,4 @@
-const MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
 async function callModel(model: string, body: Record<string, unknown>): Promise<Response> {
   const key = process.env.GOOGLE_API_KEY!;
