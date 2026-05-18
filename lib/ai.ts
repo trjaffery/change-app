@@ -1,29 +1,34 @@
+const MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+
+async function callModel(model: string, body: Record<string, unknown>): Promise<Response> {
+  const key = process.env.GOOGLE_API_KEY!;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
 export async function callAI(
   userPrompt: string,
   systemPrompt = '',
   maxTokens = 1000,
 ): Promise<string> {
-  const key = process.env.GOOGLE_API_KEY!;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
-
   const body: Record<string, unknown> = {
     contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
     generationConfig: { maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },
   };
   if (systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini ${res.status}: ${err}`);
+  let res: Response | null = null;
+  for (const model of MODELS) {
+    res = await callModel(model, body);
+    if (res.status !== 503) break;
   }
 
-  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  if (!res!.ok) {
+    const err = await res!.text();
+    throw new Error(`Gemini ${res!.status}: ${err}`);
+  }
+
+  const data = await res!.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
