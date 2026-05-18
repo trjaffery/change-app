@@ -53,9 +53,9 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
 
   const { dates } = getDateRange(mode);
   const isMonth = mode === 'month';
-  const cellSize = isMonth ? 24 : 34;
+  const cellSize = isMonth ? 22 : 32;
   const cellGap = isMonth ? 3 : 4;
-  const labelWidth = 110;
+  const labelWidth = 90;
 
   if (!data) return <div className="card" style={{ marginBottom: 22, minHeight: 80 }} />;
   if (!data.habits.length) return null;
