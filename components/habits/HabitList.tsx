@@ -58,10 +58,12 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   const [goalValue, setGoalValue] = useState(1);
 
   const fetchHabits = useCallback(async () => {
-    const res = await fetch(`/api/habits?date=${selectedDate}`);
-    const data: Habit[] = await res.json();
-    setHabits(data);
-    if (isToday) onCompletionChange?.(data.filter(h => h.is_complete).length, data.length);
+    try {
+      const res = await fetch(`/api/habits?date=${selectedDate}`);
+      const data: Habit[] = await res.json();
+      setHabits(data);
+      if (isToday) onCompletionChange?.(data.filter(h => h.is_complete).length, data.length);
+    } catch {}
   }, [selectedDate, isToday, onCompletionChange]);
 
   useEffect(() => { fetchHabits(); }, [fetchHabits]);

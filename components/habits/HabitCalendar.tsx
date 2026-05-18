@@ -48,7 +48,8 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
     const { start, end } = getDateRange(mode);
     fetch(`/api/habits/calendar?start=${start}&end=${end}`)
       .then(r => r.json())
-      .then(setData);
+      .then(setData)
+      .catch(() => {});
   }, [mode, refreshKey]);
 
   const { dates } = getDateRange(mode);

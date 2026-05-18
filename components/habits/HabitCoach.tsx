@@ -1,13 +1,14 @@
 'use client';
 import { useState } from 'react';
 
-interface HabitInsight { habitName: string; status: 'crushing' | 'on_track' | 'struggling'; advice: string }
+interface HabitInsight { habitName: string; status: 'crushing' | 'on_track' | 'struggling' | 'new'; advice: string }
 interface CoachData { insights: HabitInsight[]; newHabitSuggestion?: string }
 
 const STATUS_CONFIG = {
   crushing:   { label: 'Crushing it', color: 'var(--success)', bg: 'rgba(107,227,164,0.12)', border: 'rgba(107,227,164,0.25)' },
   on_track:   { label: 'On track',    color: '#F2C063',        bg: 'rgba(242,192,99,0.10)',   border: 'rgba(242,192,99,0.25)' },
   struggling: { label: 'Struggling',  color: 'var(--danger)',  bg: 'rgba(255,107,107,0.08)',  border: 'rgba(255,107,107,0.2)' },
+  new:        { label: 'Just started', color: '#5B9FE8',       bg: 'rgba(91,159,232,0.08)',   border: 'rgba(91,159,232,0.2)' },
 };
 
 export default function HabitCoach() {
