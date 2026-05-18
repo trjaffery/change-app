@@ -24,26 +24,13 @@ function toISODate(d: Date) {
 
 function getDateRange(mode: ViewMode): { start: string; end: string; dates: string[] } {
   const today = new Date();
+  const days = mode === 'week' ? 7 : 30;
   const dates: string[] = [];
-
-  if (mode === 'week') {
-    const dow = today.getDay();
-    const mon = new Date(today);
-    mon.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(mon);
-      d.setDate(mon.getDate() + i);
-      dates.push(toISODate(d));
-    }
-  } else {
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    for (let d = 1; d <= daysInMonth; d++) {
-      dates.push(toISODate(new Date(year, month, d)));
-    }
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    dates.push(toISODate(d));
   }
-
   return { start: dates[0], end: dates[dates.length - 1], dates };
 }
 
