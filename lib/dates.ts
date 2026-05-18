@@ -8,22 +8,12 @@ export function toDateString(d: Date): string {
   return `${d.getFullYear()}-${padZ(d.getMonth() + 1)}-${padZ(d.getDate())}`;
 }
 
-/** The "active" date: before 6 AM, yesterday is still the current day. */
 export function getActiveDateString(): string {
-  const now = new Date();
-  if (now.getHours() < 6) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 1);
-    return toDateString(d);
-  }
-  return toDateString(now);
+  return toDateString(new Date());
 }
 
-/** The "tomorrow" date relative to the active day. */
 export function getTomorrowDateString(): string {
-  const now = new Date();
-  if (now.getHours() < 6) return toDateString(now);
-  const d = new Date(now);
+  const d = new Date();
   d.setDate(d.getDate() + 1);
   return toDateString(d);
 }

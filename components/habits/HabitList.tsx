@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { getActiveDateString } from '@/lib/dates';
+import { getActiveDateString, toDateString, formatDate } from '@/lib/dates';
 
 interface Habit {
   id: string;
@@ -33,6 +33,20 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   const [habits, setHabits] = useState<Habit[]>([]);
   const [adding, setAdding] = useState(false);
   const today = getActiveDateString();
+  const [selectedDate, setSelectedDate] = useState(today);
+
+  function goBack() {
+    const d = new Date(selectedDate + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    setSelectedDate(toDateString(d));
+  }
+  function goForward() {
+    if (selectedDate >= today) return;
+    const d = new Date(selectedDate + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    setSelectedDate(toDateString(d));
+  }
+  const isToday = selectedDate === today;
 
   // Form state
   const [newName, setNewName] = useState('');
@@ -44,11 +58,11 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   const [goalValue, setGoalValue] = useState(1);
 
   const fetchHabits = useCallback(async () => {
-    const res = await fetch(`/api/habits?date=${today}`);
+    const res = await fetch(`/api/habits?date=${selectedDate}`);
     const data: Habit[] = await res.json();
     setHabits(data);
-    onCompletionChange?.(data.filter(h => h.is_complete).length, data.length);
-  }, [today, onCompletionChange]);
+    if (isToday) onCompletionChange?.(data.filter(h => h.is_complete).length, data.length);
+  }, [selectedDate, isToday, onCompletionChange]);
 
   useEffect(() => { fetchHabits(); }, [fetchHabits]);
 
@@ -56,7 +70,7 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
     await fetch('/api/habits/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit_id: habit.id, date: today }),
+      body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
     });
     fetchHabits();
   }
@@ -66,7 +80,7 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
     await fetch('/api/habits/completions', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit_id: habit.id, date: today }),
+      body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
     });
     fetchHabits();
   }
@@ -134,16 +148,27 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
       `}</style>
       <div className="card" style={{ marginBottom: 22 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (habits.length > 0 || adding) ? 16 : 0 }}>
-          <div className="section-title" style={{ margin: 0 }}>Habits</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="section-title" style={{ margin: 0 }}>Habits</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button onClick={goBack} style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px' }}>‹</button>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: isToday ? 'var(--text-secondary)' : 'var(--text-primary)', minWidth: 80, textAlign: 'center' }}>
+                {isToday ? 'Today' : formatDate(selectedDate)}
+              </span>
+              <button onClick={goForward} disabled={isToday} style={{ background: 'none', border: 'none', color: isToday ? 'transparent' : 'var(--text-tertiary)', cursor: isToday ? 'default' : 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px' }}>›</button>
+            </div>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {habits.length > 0 && (
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)' }}>
                 {habits.filter(h => h.is_complete).length}/{habits.length} done
               </span>
             )}
-            <button className="btn-secondary" style={{ padding: '6px 14px', fontSize: 12 }} onClick={() => setAdding(a => !a)}>
-              {adding ? 'Cancel' : '+ Add habit'}
-            </button>
+            {isToday && (
+              <button className="btn-secondary" style={{ padding: '6px 14px', fontSize: 12 }} onClick={() => setAdding(a => !a)}>
+                {adding ? 'Cancel' : '+ Add habit'}
+              </button>
+            )}
           </div>
         </div>
 
