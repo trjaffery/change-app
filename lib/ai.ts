@@ -1,24 +1,30 @@
-import { GoogleGenAI } from '@google/genai';
-
-function getClient() {
-  return new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY! });
-}
-
 export async function callAI(
   userPrompt: string,
   systemPrompt = '',
   maxTokens = 1000,
 ): Promise<string> {
-  const response = await getClient().models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: userPrompt,
-    config: {
-      ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
-      maxOutputTokens: maxTokens,
-      thinkingConfig: { thinkingBudget: 0 },
-    },
+  const key = process.env.GOOGLE_API_KEY!;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+
+  const body: Record<string, unknown> = {
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: { maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },
+  };
+  if (systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
-  return response.text ?? '';
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini ${res.status}: ${err}`);
+  }
+
+  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
 export function parseJSON<T>(raw: string): T {
