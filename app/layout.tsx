@@ -20,7 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="grain" />
         <Sidebar />
         <main className="main-content">
-          {children}
+          <div className="main-inner">
+            {children}
+          </div>
         </main>
       </body>
     </html>

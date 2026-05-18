@@ -59,17 +59,25 @@ body::after {
 /* ── Layout ─────────────────────────────────────────────────────────────── */
 .main-content {
   margin-left: var(--sidebar-w);
-  padding: 32px 48px 60px;
-  max-width: 900px;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
   position: relative;
   z-index: 2;
+}
+
+.main-inner {
+  width: 100%;
+  max-width: 860px;
+  padding: 32px 40px 60px;
 }
 
 @media (max-width: 600px) {
   .main-content {
     margin-left: 0;
+  }
+  .main-inner {
     padding: 20px 16px calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
-    max-width: 100%;
   }
 }
 
