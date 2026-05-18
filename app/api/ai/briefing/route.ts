@@ -6,6 +6,8 @@ function toDateStr(d: Date) {
   return d.toISOString().split('T')[0];
 }
 
+export const maxDuration = 25;
+
 export async function POST() {
   if (!process.env.GOOGLE_API_KEY) return NextResponse.json({ error: 'GOOGLE_API_KEY not set' }, { status: 500 });
 
