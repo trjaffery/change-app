@@ -5,20 +5,31 @@ import { getActiveDateString } from '@/lib/dates';
 export default function DailyBriefing() {
   const [briefing, setBriefing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const today = getActiveDateString();
   const cacheKey = `briefing_${today}`;
 
   async function generate(bypassCache = false) {
     setLoading(true);
+    setError(false);
     if (!bypassCache) {
       const cached = localStorage.getItem(cacheKey);
       if (cached) { setBriefing(cached); setLoading(false); return; }
     }
-    const res = await fetch('/api/ai/briefing', { method: 'POST' });
-    const data = await res.json();
-    if (data.briefing) {
-      localStorage.setItem(cacheKey, data.briefing);
-      setBriefing(data.briefing);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      const res = await fetch('/api/ai/briefing', { method: 'POST', signal: controller.signal });
+      clearTimeout(timeout);
+      const data = await res.json();
+      if (data.briefing) {
+        localStorage.setItem(cacheKey, data.briefing);
+        setBriefing(data.briefing);
+      } else {
+        setError(true);
+      }
+    } catch {
+      setError(true);
     }
     setLoading(false);
   }
@@ -50,6 +61,8 @@ export default function DailyBriefing() {
             <div className="briefing-skeleton" style={{ width: '85%' }} />
             <div className="briefing-skeleton" style={{ width: '70%' }} />
           </>
+        ) : error ? (
+          <p style={{ fontSize: 13, color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic' }}>Couldn't generate briefing — tap Refresh to try again.</p>
         ) : (
           <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text-secondary)', margin: 0 }}>{briefing}</p>
         )}

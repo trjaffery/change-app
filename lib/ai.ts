@@ -15,6 +15,7 @@ export async function callAI(
     config: {
       ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
       maxOutputTokens: maxTokens,
+      thinkingConfig: { thinkingBudget: 0 },
     },
   });
   return response.text ?? '';
