@@ -68,23 +68,39 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
 
   useEffect(() => { fetchHabits(); }, [fetchHabits]);
 
+  useEffect(() => {
+    if (isToday) onCompletionChange?.(habits.filter(h => h.is_complete).length, habits.length);
+  }, [habits, isToday, onCompletionChange]);
+
+  function optimisticUpdate(habitId: string, delta: 1 | -1) {
+    setHabits(prev => prev.map(h => {
+      if (h.id !== habitId) return h;
+      const newDone = Math.max(0, h.period_done + delta);
+      return { ...h, period_done: newDone, is_complete: newDone >= h.goal_value };
+    }));
+  }
+
   async function increment(habit: Habit) {
-    await fetch('/api/habits/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
-    });
-    fetchHabits();
+    optimisticUpdate(habit.id, 1);
+    try {
+      await fetch('/api/habits/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
+      });
+    } catch { fetchHabits(); }
   }
 
   async function decrement(habit: Habit) {
     if (habit.period_done === 0) return;
-    await fetch('/api/habits/completions', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
-    });
-    fetchHabits();
+    optimisticUpdate(habit.id, -1);
+    try {
+      await fetch('/api/habits/completions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
+      });
+    } catch { fetchHabits(); }
   }
 
   async function addHabit() {
