@@ -4,15 +4,13 @@ const TOKEN = process.env.APP_TOKEN;
 const COOKIE = 'app_token';
 const PUBLIC_PATHS = ['/login', '/api/auth'];
 
-export function proxy(req: NextRequest) {
+export default function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Let public paths and Next.js internals through
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p)) || pathname.startsWith('/_next')) {
     return NextResponse.next();
   }
 
-  // Check query param first — set cookie and redirect to clean URL
   const qToken = req.nextUrl.searchParams.get('token');
   if (qToken && qToken === TOKEN) {
     const url = req.nextUrl.clone();
@@ -22,11 +20,9 @@ export function proxy(req: NextRequest) {
     return res;
   }
 
-  // Check cookie
   const cookie = req.cookies.get(COOKIE)?.value;
   if (cookie && cookie === TOKEN) return NextResponse.next();
 
-  // No valid token — redirect to login
   const loginUrl = req.nextUrl.clone();
   loginUrl.pathname = '/login';
   return NextResponse.redirect(loginUrl);
