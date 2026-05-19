@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getActiveDateString, toDateString, formatDate } from '@/lib/dates';
 
 interface Habit {
@@ -57,27 +57,30 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   const [goalPeriod, setGoalPeriod] = useState<'day' | 'week' | 'month'>('day');
   const [goalValue, setGoalValue] = useState(1);
 
+  const onCompletionChangeRef = useRef(onCompletionChange);
+  onCompletionChangeRef.current = onCompletionChange;
+
   const fetchHabits = useCallback(async () => {
     try {
       const res = await fetch(`/api/habits?date=${selectedDate}`);
       const data: Habit[] = await res.json();
       setHabits(data);
-      if (isToday) onCompletionChange?.(data.filter(h => h.is_complete).length, data.length);
+      if (isToday) onCompletionChangeRef.current?.(data.filter(h => h.is_complete).length, data.length);
     } catch {}
-  }, [selectedDate, isToday, onCompletionChange]);
+  }, [selectedDate, isToday]);
 
   useEffect(() => { fetchHabits(); }, [fetchHabits]);
 
-  useEffect(() => {
-    if (isToday) onCompletionChange?.(habits.filter(h => h.is_complete).length, habits.length);
-  }, [habits, isToday, onCompletionChange]);
-
   function optimisticUpdate(habitId: string, delta: 1 | -1) {
-    setHabits(prev => prev.map(h => {
-      if (h.id !== habitId) return h;
-      const newDone = Math.max(0, h.period_done + delta);
-      return { ...h, period_done: newDone, is_complete: newDone >= h.goal_value };
-    }));
+    setHabits(prev => {
+      const next = prev.map(h => {
+        if (h.id !== habitId) return h;
+        const newDone = Math.max(0, h.period_done + delta);
+        return { ...h, period_done: newDone, is_complete: newDone >= h.goal_value };
+      });
+      if (isToday) onCompletionChangeRef.current?.(next.filter(h => h.is_complete).length, next.length);
+      return next;
+    });
   }
 
   async function increment(habit: Habit) {
