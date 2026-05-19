@@ -2,8 +2,10 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"main": ".open-next/worker.js",
 	"name": "change-app",
-	"compatibility_date": "2025-05-01",
+	"compatibility_date": "2026-05-19",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"workers_dev": true,
+	"preview_urls": true,
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
