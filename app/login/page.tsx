@@ -3,10 +3,29 @@ import { useState } from 'react';
 
 export default function LoginPage() {
   const [token, setToken] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    window.location.href = `/?token=${encodeURIComponent(token)}`;
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      if (res.ok) {
+        window.location.href = '/';
+      } else {
+        setError('Invalid token. Try again.');
+      }
+    } catch {
+      setError('Connection error. Try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -26,11 +45,11 @@ export default function LoginPage() {
             style={{ width: '100%' }}
             autoFocus
           />
-          <button className="btn-primary" type="submit" style={{ width: '100%' }}>Enter →</button>
+          {error && <div style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div>}
+          <button className="btn-primary" type="submit" style={{ width: '100%' }} disabled={loading}>
+            {loading ? 'Checking…' : 'Enter →'}
+          </button>
         </form>
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 14 }}>
-          Or visit <code style={{ fontSize: 11 }}>?token=your-token</code> directly.
-        </div>
       </div>
     </div>
   );
