@@ -29,6 +29,8 @@ export default function ProgressGraph({ refreshKey }: { refreshKey: number }) {
   }, [selected]);
 
   async function getPlateauTip() {
+    const storedRest = localStorage.getItem('gymRestDuration');
+    const restSeconds = storedRest ? Number(storedRest) : 90;
     setPlateauLoading(true);
     try {
       const res = await fetch('/api/ai/plateau', {
@@ -37,6 +39,7 @@ export default function ProgressGraph({ refreshKey }: { refreshKey: number }) {
         body: JSON.stringify({
           exercise: selected,
           sessions: history.slice(-4).map(h => ({ date: h.date, maxWeight: h.maxWeight })),
+          restSeconds,
         }),
       });
       const data = await res.json() as { suggestion?: string };

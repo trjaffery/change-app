@@ -272,11 +272,17 @@ export default function FinancePage() {
   }, []);
 
   const fetchPlaid = useCallback(async (): Promise<PlaidConnection[]> => {
-    const res = await fetch('/api/plaid/accounts');
-    const d = await res.json() as PlaidConnection[];
-    const conns = Array.isArray(d) ? d : [];
-    setPlaidConns(conns);
-    return conns;
+    try {
+      const res = await fetch('/api/plaid/accounts');
+      if (!res.ok) { setPlaidConns([]); return []; }
+      const d = await res.json() as PlaidConnection[];
+      const conns = Array.isArray(d) ? d : [];
+      setPlaidConns(conns);
+      return conns;
+    } catch {
+      setPlaidConns([]);
+      return [];
+    }
   }, []);
 
   const fetchNWHistory = useCallback(async () => {

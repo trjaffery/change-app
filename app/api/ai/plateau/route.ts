@@ -4,9 +4,10 @@ import { callAI } from '@/lib/ai';
 export async function POST(req: NextRequest) {
   if (!process.env.GOOGLE_API_KEY) return NextResponse.json({ error: 'no_key' }, { status: 503 });
 
-  const { exercise, sessions } = await req.json() as {
+  const { exercise, sessions, restSeconds } = await req.json() as {
     exercise: string;
     sessions: { date: string; maxWeight: number }[];
+    restSeconds?: number;
   };
 
   if (!exercise || !sessions?.length) {
@@ -14,10 +15,11 @@ export async function POST(req: NextRequest) {
   }
 
   const sessionList = sessions.map(s => `${s.date.slice(5)}: ${s.maxWeight}lb`).join(' → ');
+  const restNote = restSeconds !== undefined ? `\nTypical rest between sets: ${restSeconds}s.` : '';
 
   const prompt = `Exercise: ${exercise}
-Last ${sessions.length} sessions: ${sessionList}
-No meaningful weight increase over these sessions. Give one specific, actionable recommendation to break the plateau — deload week, rep scheme change (e.g. 5x5 → 3x8), exercise variation, or a technique cue. 2 sentences max.`;
+Last ${sessions.length} sessions: ${sessionList}${restNote}
+No meaningful weight increase over these sessions. Give one specific, actionable recommendation to break the plateau — deload week, rep scheme change (e.g. 5x5 → 3x8), exercise variation, or a technique cue. If rest is notably short for strength work, mention that. 2 sentences max.`;
 
   try {
     const suggestion = await callAI(

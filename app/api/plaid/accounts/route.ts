@@ -25,21 +25,31 @@ export async function GET(req: NextRequest) {
 
   const results = await Promise.all(
     connections.map(async (conn) => {
-      const res = await fetch(`${plaidBase()}/accounts/get`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          client_id: process.env.PLAID_CLIENT_ID,
-          secret: process.env.PLAID_SECRET,
-          access_token: conn.access_token,
-        }),
-      });
-      const data = await res.json() as { accounts?: PlaidAccount[] };
-      return {
-        institution_name: conn.institution_name as string | null,
-        item_id: conn.item_id as string,
-        accounts: (data.accounts ?? []) as PlaidAccount[],
-      };
+      try {
+        const res = await fetch(`${plaidBase()}/accounts/get`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            client_id: process.env.PLAID_CLIENT_ID,
+            secret: process.env.PLAID_SECRET,
+            access_token: conn.access_token,
+          }),
+        });
+        const data = res.ok ? await res.json() as { accounts?: PlaidAccount[] } : {};
+        return {
+          institution_name: conn.institution_name as string | null,
+          item_id: conn.item_id as string,
+          accounts: (data.accounts ?? []) as PlaidAccount[],
+          error: !res.ok ? `Plaid error ${res.status}` : undefined,
+        };
+      } catch {
+        return {
+          institution_name: conn.institution_name as string | null,
+          item_id: conn.item_id as string,
+          accounts: [] as PlaidAccount[],
+          error: 'Connection failed',
+        };
+      }
     })
   );
 
