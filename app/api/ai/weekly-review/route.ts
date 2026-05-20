@@ -13,13 +13,15 @@ export async function POST() {
   const today = toDateStr(new Date());
   const sevenAgo = toDateStr(new Date(Date.now() - 7 * 86400000));
 
-  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, settingsRes] = await Promise.all([
+  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, settingsRes, nwHistoryRes, subsRes] = await Promise.all([
     sb.from('habits').select('id, name, goal_value, goal_period').is('archived_at', null),
     sb.from('habit_completions').select('habit_id, date, count').gte('date', sevenAgo).lte('date', today),
     sb.from('gym_sessions').select('date, duration_seconds, split_days(name)').gte('date', sevenAgo).lte('date', today),
     sb.from('gym_sets').select('date, exercise, reps, weight').gte('date', sevenAgo).lte('date', today),
     sb.from('recovery_urges').select('intensity, created_at').gte('created_at', new Date(Date.now() - 7 * 86400000).toISOString()),
     sb.from('recovery_settings').select('key, value'),
+    sb.from('finance_nw_history').select('total, snapshot_date').gte('snapshot_date', sevenAgo).lte('snapshot_date', today).order('snapshot_date'),
+    sb.from('finance_subscriptions').select('amount, billing_cycle'),
   ]);
 
   const habits = habitsRes.data ?? [];
@@ -51,6 +53,17 @@ export async function POST() {
   }
   const topExercises = Object.entries(volumeByExercise).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([e, v]) => `${e} (${Math.round(v)} lbs total volume)`);
 
+  // Finance stats
+  const nwHistory = nwHistoryRes.data ?? [];
+  const nwChange = nwHistory.length >= 2 ? nwHistory[nwHistory.length - 1].total - nwHistory[0].total : null;
+  function toMonthlyRate(amount: number, cycle: string) {
+    if (cycle === 'yearly') return amount / 12;
+    if (cycle === 'quarterly') return amount / 3;
+    if (cycle === 'weekly') return (amount * 52) / 12;
+    return amount;
+  }
+  const monthlyBurn = (subsRes.data ?? []).reduce((s, sub) => s + toMonthlyRate(sub.amount, sub.billing_cycle), 0);
+
   // Urge stats
   const urgeCount = urges.length;
   const avgIntensity = urges.length ? (urges.reduce((s, u) => s + u.intensity, 0) / urges.length).toFixed(1) : null;
@@ -69,10 +82,16 @@ RECOVERY:
 - Current streak: ${streakDays !== null ? `${streakDays} days` : 'not set'}
 - Urges this week: ${urgeCount}${avgIntensity ? ` (avg intensity ${avgIntensity}/5)` : ''}
 
-Return JSON with this exact shape:
-{"summary":"2-3 sentence overall summary of the week","wins":["2-3 specific wins based on their data"],"improvements":["2-3 specific areas to improve"],"plan":["3-4 concrete action items for next week based on the data"]}`;
+FINANCE:
+- Net worth change this week: ${nwChange !== null ? `${nwChange >= 0 ? '+' : '−'}$${Math.abs(Math.round(nwChange)).toLocaleString()}` : 'no data'}
+- Monthly subscriptions: $${monthlyBurn.toFixed(0)}/mo
 
-  const raw = await callAI(prompt, 'You are a personal coach giving a weekly review. Be specific, reference their actual numbers, be honest but encouraging. Respond with compact JSON only — no markdown.', 1200);
+Return JSON with this exact shape:
+{"summary":"2-3 sentence overall summary of the week","wins":["2-3 specific wins based on their data"],"improvements":["2-3 specific areas to improve"],"plan":["3-4 concrete action items for next week based on the data"]}
+
+Look for cross-domain patterns — e.g. does working out correlate with fewer urges? Does missing habits affect gym consistency? Include any meaningful connection as a win or plan item.`;
+
+  const raw = await callAI(prompt, 'You are a personal coach giving a weekly review. Be specific, reference their actual numbers, be honest but encouraging. Respond with compact JSON only — no markdown. The user is Muslim. Where it feels genuine, reference Islamic values — gratitude (alhamdulillah), reflecting on blessings, perseverance. Subtle and restrained.', 1200);
   const result = parseJSON<ReviewResponse>(raw);
 
   return NextResponse.json(result);

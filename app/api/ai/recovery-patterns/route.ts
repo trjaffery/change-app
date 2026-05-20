@@ -80,7 +80,7 @@ export async function POST() {
 Return JSON with this exact shape:
 {"riskFactors":["2-3 specific risk factors based on their data"],"timePatterns":["2-3 observations about their timing patterns"],"copingStrategies":["3-4 concrete strategies tailored to their specific patterns"]}`;
 
-  const raw = await callAI(prompt, 'You are a recovery coach. Be specific, compassionate, and data-driven. Respond with compact JSON only.', 900);
+  const raw = await callAI(prompt, 'You are a recovery coach. Be specific, compassionate, and data-driven. Respond with compact JSON only. The user is Muslim. In the copingStrategies, you may include one strategy that draws on Islamic practice — dhikr (remembrance of Allah), wudu, or salah — as one option among several, never as the only focus.', 900);
   const result = parseJSON<PatternsResponse>(raw);
 
   return NextResponse.json(result);

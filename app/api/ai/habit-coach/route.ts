@@ -6,6 +6,19 @@ function toDateStr(d: Date) {
   return d.toISOString().split('T')[0];
 }
 
+function computeStreak30(comps: { date: string; count: number }[], goalValue: number, today: string): number {
+  const hit = new Set(comps.filter(c => c.count >= goalValue).map(c => c.date));
+  let streak = 0;
+  const d = new Date(today + 'T00:00:00');
+  if (!hit.has(today)) d.setDate(d.getDate() - 1);
+  for (let i = 0; i < 30; i++) {
+    const ds = d.toISOString().split('T')[0];
+    if (!hit.has(ds)) break;
+    streak++; d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
 interface HabitInsight { habitName: string; status: 'crushing' | 'on_track' | 'struggling' | 'new'; advice: string }
 interface CoachResponse { insights: HabitInsight[]; newHabitSuggestion?: string }
 
@@ -39,6 +52,7 @@ export async function POST() {
       const daysSinceCreation = Math.max(1, Math.floor((Date.now() - createdAt.getTime()) / 86400000));
       const trackingDays = Math.min(30, daysSinceCreation);
       const completionRate = Math.round((daysLogged / trackingDays) * 100);
+      const streak = computeStreak30(comps, h.goal_value, today);
       return {
         name: h.name,
         goal_value: h.goal_value,
@@ -46,13 +60,14 @@ export async function POST() {
         completionRate,
         daysHit: daysLogged,
         trackingDays,
+        streak,
         isNew: trackingDays < 7,
       };
     });
 
     const prompt = `Here are my habits with their actual tracking data:
 ${habitStats.map(h =>
-  `- ${h.name}: hit goal ${h.daysHit}/${h.trackingDays} days (${h.completionRate}%), goal is ${h.goal_value}x per ${h.goal_period}${h.isNew ? ` [HABIT IS ONLY ${h.trackingDays} DAY(S) OLD]` : ''}`
+  `- ${h.name}: hit goal ${h.daysHit}/${h.trackingDays} days (${h.completionRate}%), current streak: ${h.streak} days, goal is ${h.goal_value}x per ${h.goal_period}${h.isNew ? ` [HABIT IS ONLY ${h.trackingDays} DAY(S) OLD]` : ''}`
 ).join('\n')}
 
 Analyse each habit and return a JSON object with this exact shape:
@@ -63,7 +78,7 @@ Rules:
 - For established habits (7+ days): "crushing" if ≥ 80%, "on_track" if 50–79%, "struggling" if < 50%
 - Keep advice positive and specific to what the habit actually is`;
 
-    const raw = await callAI(prompt, 'You are a supportive habit coach. Respond with compact JSON only — no markdown, no extra text.', 1000);
+    const raw = await callAI(prompt, 'You are a supportive habit coach. Respond with compact JSON only — no markdown, no extra text. The user is Muslim. In the advice strings, where natural, you may briefly reference Islamic values like istiqama (steadfastness) or sabr. One subtle reference across all insights max — never preachy.', 1000);
     const result = parseJSON<CoachResponse>(raw);
 
     return NextResponse.json(result);

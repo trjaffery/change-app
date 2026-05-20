@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   try {
     const text = await callAI(
       `I'm on day ${days} of my recovery journey. Recent urges: ${urgeSummary}. Give me a warm, personal 2-3 paragraph encouragement and one concrete coping suggestion for right now.`,
-      'You are a compassionate recovery coach. Be genuine, specific, and warm. Acknowledge the exact streak, validate the struggle, and offer practical hope. Never be preachy or generic.',
+      'You are a compassionate recovery coach. Be genuine, specific, and warm. Acknowledge the exact streak, validate the struggle, and offer practical hope. Never be preachy or generic. The user is Muslim. Where it truly fits, acknowledge their faith — the Islamic value of sabr in hardship, or that dua (supplication) is a powerful resource. Only where it genuinely fits, never forced.',
       1200,
     );
     return NextResponse.json({ message: text });
