@@ -11,7 +11,7 @@ export async function POST() {
 
   const sb = supabaseServer();
   const [urgesRes, settingsRes] = await Promise.all([
-    sb.from('recovery_urges').select('intensity, note, created_at').order('created_at', { ascending: true }),
+    sb.from('recovery_urges').select('intensity, note, triggers, created_at').order('created_at', { ascending: true }),
     sb.from('recovery_settings').select('key, value'),
   ]);
 
@@ -53,6 +53,15 @@ export async function POST() {
   const peakTime = (Object.entries(timeCounts).sort((a, b) => b[1] - a[1])[0][0]);
   const topWords = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([w]) => w);
 
+  // Trigger tag distribution
+  const triggerCounts: Record<string, number> = {};
+  for (const u of urges) {
+    for (const t of ((u as { triggers?: string[] }).triggers ?? [])) {
+      triggerCounts[t] = (triggerCounts[t] ?? 0) + 1;
+    }
+  }
+  const triggerSummary = Object.entries(triggerCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${t}: ${c}`).join(', ') || 'none tagged';
+
   // Intensity trend: compare first half vs second half
   const half = Math.floor(urges.length / 2);
   const firstHalfAvg = urges.slice(0, half).reduce((s, u) => s + u.intensity, 0) / half;
@@ -66,6 +75,7 @@ export async function POST() {
 - Peak urge time: ${peakTime} (${timeCounts[peakTime as keyof typeof timeCounts]} urges)
 - Time breakdown: Morning ${timeCounts.Morning}, Afternoon ${timeCounts.Afternoon}, Evening ${timeCounts.Evening}, Night ${timeCounts.Night}
 - Common themes in urge notes: ${topWords.length ? topWords.join(', ') : 'no notes recorded'}
+- Trigger distribution: ${triggerSummary}
 
 Return JSON with this exact shape:
 {"riskFactors":["2-3 specific risk factors based on their data"],"timePatterns":["2-3 observations about their timing patterns"],"copingStrategies":["3-4 concrete strategies tailored to their specific patterns"]}`;

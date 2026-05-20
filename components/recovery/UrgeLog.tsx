@@ -1,12 +1,15 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 
-interface Urge { id: string; intensity: number; note: string; created_at: string }
+interface Urge { id: string; intensity: number; note: string; triggers: string[]; created_at: string }
+
+const TRIGGERS = ['Stress', 'Boredom', 'Social', 'Physical', 'Emotional'];
 
 export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void }) {
   const [urges, setUrges] = useState<Urge[]>([]);
   const [intensity, setIntensity] = useState(3);
   const [note, setNote] = useState('');
+  const [triggers, setTriggers] = useState<Set<string>>(new Set());
 
   const fetchUrges = useCallback(async () => {
     const res = await fetch('/api/recovery/urges');
@@ -15,13 +18,17 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
 
   useEffect(() => { fetchUrges(); }, [fetchUrges]);
 
+  function toggleTrigger(t: string) {
+    setTriggers(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  }
+
   async function logUrge() {
     await fetch('/api/recovery/urges', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ intensity, note }),
+      body: JSON.stringify({ intensity, note, triggers: [...triggers] }),
     });
-    setNote(''); setIntensity(3);
+    setNote(''); setIntensity(3); setTriggers(new Set());
     fetchUrges(); onUrgeLogged?.();
   }
 
@@ -48,6 +55,18 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
             <input id="urge-intensity" type="range" className="urge-slider" min={1} max={5} value={intensity} onChange={e => setIntensity(Number(e.target.value))} />
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 800, color: 'var(--warning)', width: 24, textAlign: 'center' }}>{intensity}</span>
           </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {TRIGGERS.map(t => (
+              <button key={t} onClick={() => toggleTrigger(t)} style={{
+                padding: '4px 10px', borderRadius: 20, border: '1px solid',
+                borderColor: triggers.has(t) ? 'rgba(242,192,99,0.5)' : 'rgba(255,255,255,0.1)',
+                background: triggers.has(t) ? 'rgba(242,192,99,0.12)' : 'transparent',
+                color: triggers.has(t) ? '#F2C063' : 'var(--text-tertiary)',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                transition: 'all 0.15s',
+              }}>{t}</button>
+            ))}
+          </div>
           <input className="text-input" type="text" placeholder="Optional note…" style={{ width: '100%' }} value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => e.key === 'Enter' && logUrge()} />
           <div><button className="btn-primary" style={{ padding: '10px 18px', fontSize: 13 }} onClick={logUrge}>Log Urge</button></div>
         </div>
@@ -59,6 +78,13 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, color: 'var(--warning)', width: 20, flexShrink: 0 }}>{u.intensity}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{u.note || 'No note'}</div>
+                {u.triggers?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                    {u.triggers.map(t => (
+                      <span key={t} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: 'rgba(242,192,99,0.1)', color: '#F2C063', letterSpacing: '0.05em' }}>{t}</span>
+                    ))}
+                  </div>
+                )}
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>{ts}</div>
               </div>
               <button className="urge-delete" onClick={() => deleteUrge(u.id)}>×</button>

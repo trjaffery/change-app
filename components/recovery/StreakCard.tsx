@@ -17,7 +17,6 @@ function computeDays(start: string): number {
 export default function StreakCard({ onStreakChange }: { onStreakChange?: (days: number) => void }) {
   const [start, setStart] = useState('');
   const [days, setDays] = useState(0);
-  const [dateInput, setDateInput] = useState('');
   const [loading, setLoading] = useState(true);
 
   async function fetchStart() {
@@ -32,7 +31,6 @@ export default function StreakCard({ onStreakChange }: { onStreakChange?: (days:
       });
     }
     setStart(s);
-    setDateInput(s);
     const d = computeDays(s);
     setDays(d);
     onStreakChange?.(d);
@@ -40,19 +38,6 @@ export default function StreakCard({ onStreakChange }: { onStreakChange?: (days:
   }
 
   useEffect(() => { fetchStart(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function saveStart() {
-    if (!dateInput) return;
-    await fetch('/api/recovery/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'sobriety_start', value: dateInput }),
-    });
-    setStart(dateInput);
-    const d = computeDays(dateInput);
-    setDays(d);
-    onStreakChange?.(d);
-  }
 
   if (loading) return <div className="card" style={{ marginBottom: 22, minHeight: 120 }} />;
 
@@ -68,21 +53,10 @@ export default function StreakCard({ onStreakChange }: { onStreakChange?: (days:
         </div>
         <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 8 }}>days clean</div>
         {start && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 20 }}>Since {formatDate(start)}</div>}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 20 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
           {MILESTONES.map(m => (
             <div key={m.days} className={`milestone-badge${days >= m.days ? ' earned' : ''}`}>{m.label}</div>
           ))}
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Start date:</span>
-          <input
-            className="text-input"
-            type="date"
-            value={dateInput}
-            onChange={e => setDateInput(e.target.value)}
-            style={{ padding: '7px 12px', fontSize: 12 }}
-          />
-          <button className="btn-primary" style={{ padding: '7px 14px', fontSize: 12 }} onClick={saveStart}>Set</button>
         </div>
       </div>
     </>
