@@ -40,6 +40,18 @@ function toMonthly(amount: number, cycle: string) {
   return amount;
 }
 
+function toYearly(amount: number, cycle: string) {
+  if (cycle === 'yearly') return amount;
+  if (cycle === 'quarterly') return amount * 4;
+  if (cycle === 'weekly') return amount * 52;
+  return amount * 12;
+}
+
+function daysUntil(d: string | null) {
+  if (!d) return null;
+  return Math.ceil((new Date(d + 'T12:00:00').getTime() - new Date().setHours(12, 0, 0, 0)) / 86400000);
+}
+
 function DonutChart({ data, netWorth }: { data: { label: string; value: number; color: string }[]; netWorth: number }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (total <= 0) return null;
@@ -194,6 +206,14 @@ export default function FinancePage() {
     setExpandedAccounts(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
+  // Subscription view
+  const [costView, setCostView] = useState<'monthly' | 'yearly'>('monthly');
+
+  // Savings rate
+  const [monthlyIncome, setMonthlyIncome] = useState(0);
+  const [editingIncome, setEditingIncome] = useState(false);
+  const [incomeInput, setIncomeInput] = useState('');
+
   // Subscription scan
   const [scanLoading, setScanLoading] = useState(false);
   const [candidates, setCandidates] = useState<SubCandidate[] | null>(null);
@@ -301,6 +321,18 @@ export default function FinancePage() {
     fetchNWHistory();
   }, [fetchItems, fetchSubs, fetchOrders, fetchWishlist, fetchPlaid, fetchNWHistory]);
 
+  useEffect(() => {
+    const stored = localStorage.getItem('finance_monthly_income');
+    if (stored) setMonthlyIncome(Number(stored));
+  }, []);
+
+  function saveIncome() {
+    const val = Number(incomeInput);
+    setMonthlyIncome(val);
+    localStorage.setItem('finance_monthly_income', String(val));
+    setEditingIncome(false);
+  }
+
   // Computed totals
   const byCategory = (['bank', 'stocks', 'crypto', 'other'] as Category[]).reduce((acc, cat) => {
     acc[cat] = items.filter(i => i.category === cat).reduce((s, i) => s + i.value, 0);
@@ -329,6 +361,14 @@ export default function FinancePage() {
   }, [itemsLoading, plaidConns]);
 
   const monthlyBurn = subs.reduce((s, sub) => s + toMonthly(sub.amount, sub.billing_cycle), 0);
+  const yearlyBurn = subs.reduce((s, sub) => s + toYearly(sub.amount, sub.billing_cycle), 0);
+  const savingsRate = monthlyIncome > 0 ? Math.max(0, (monthlyIncome - monthlyBurn) / monthlyIncome * 100) : 0;
+  const sortedSubs = [...subs].sort((a, b) => {
+    if (!a.next_renewal && !b.next_renewal) return 0;
+    if (!a.next_renewal) return 1;
+    if (!b.next_renewal) return -1;
+    return new Date(a.next_renewal).getTime() - new Date(b.next_renewal).getTime();
+  });
   const totalOrders = orders.reduce((s, o) => s + o.amount, 0);
   const totalWishlist = wishlist.reduce((s, w) => s + w.amount, 0);
 
@@ -536,6 +576,10 @@ export default function FinancePage() {
         .plaid-conn { margin-bottom: 12px; }
         .plaid-inst { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; }
         .sub-cycle { font-size: 10px; color: var(--text-tertiary); background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+        .sub-urgent { background: rgba(242,192,99,0.07) !important; border: 1px solid rgba(242,192,99,0.18) !important; }
+        .cost-toggle { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; display: flex; overflow: hidden; }
+        .cost-toggle-btn { border: none; cursor: pointer; font-family: var(--font-sans); font-size: 11px; font-weight: 600; padding: 5px 11px; background: transparent; color: var(--text-tertiary); transition: all 0.15s; }
+        .cost-toggle-btn.active { background: rgba(255,255,255,0.1); color: var(--text-primary); }
       `}</style>
 
       <h1 className="page-title">Finance</h1>
@@ -582,6 +626,62 @@ export default function FinancePage() {
                 {nwHistory.length >= 2 && (
                   <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                     <NWChart data={nwHistory} />
+                  </div>
+                )}
+              </div>
+
+              {/* Savings Rate */}
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>Savings Rate</div>
+                  {!editingIncome && (
+                    <button className="icon-btn" style={{ fontSize: 12 }} onClick={() => { setEditingIncome(true); setIncomeInput(monthlyIncome > 0 ? String(monthlyIncome) : ''); }}>✎</button>
+                  )}
+                </div>
+                {editingIncome ? (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      className="text-input"
+                      type="number"
+                      placeholder="Monthly income ($)"
+                      value={incomeInput}
+                      onChange={e => setIncomeInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && saveIncome()}
+                      autoFocus
+                      style={{ fontSize: 13, padding: '8px 12px', flex: 1, minWidth: 160 }}
+                    />
+                    <button className="btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={saveIncome}>Save</button>
+                    <button className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => setEditingIncome(false)}>Cancel</button>
+                  </div>
+                ) : monthlyIncome > 0 ? (
+                  <div>
+                    <div style={{ display: 'flex', gap: 24, marginBottom: 12, flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Income</div>
+                        <div style={{ fontSize: 15, fontWeight: 700 }}>{fmtDec(monthlyIncome)}<span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 400 }}>/mo</span></div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Subscriptions</div>
+                        <div style={{ fontSize: 15, fontWeight: 700 }}>{fmtDec(monthlyBurn)}<span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 400 }}>/mo</span></div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Savings rate</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 10 ? '#F2C063' : 'var(--danger)' }}>
+                          {savingsRate.toFixed(1)}%
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min(savingsRate, 100)}%`, height: '100%', background: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 10 ? '#F2C063' : 'var(--danger)', borderRadius: 4, transition: 'width 0.4s ease' }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6 }}>Based on tracked subscriptions · savings from other spending not included</div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
+                    Set your monthly income to track your savings rate.{' '}
+                    <button style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }} onClick={() => { setEditingIncome(true); setIncomeInput(''); }}>
+                      Set income
+                    </button>
                   </div>
                 )}
               </div>
@@ -779,9 +879,15 @@ export default function FinancePage() {
       {tab === 'subscriptions' && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
-            <div className="stat-pill" style={{ marginBottom: 0 }}>
-              <span className="stat-pill-num">{fmtDec(monthlyBurn)}</span>
-              <span className="stat-pill-label">/month</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="stat-pill" style={{ marginBottom: 0 }}>
+                <span className="stat-pill-num">{fmtDec(costView === 'monthly' ? monthlyBurn : yearlyBurn)}</span>
+                <span className="stat-pill-label">{costView === 'monthly' ? '/month' : '/year'}</span>
+              </div>
+              <div className="cost-toggle">
+                <button className={`cost-toggle-btn${costView === 'monthly' ? ' active' : ''}`} onClick={() => setCostView('monthly')}>Monthly</button>
+                <button className={`cost-toggle-btn${costView === 'yearly' ? ' active' : ''}`} onClick={() => setCostView('yearly')}>Annual</button>
+              </div>
             </div>
             {plaidConns.length > 0 && (
               <button
@@ -802,17 +908,28 @@ export default function FinancePage() {
               {subs.length === 0 && !addingSub && !candidates && (
                 <div className="empty-state">No subscriptions yet</div>
               )}
-              {subs.map(sub => (
-                <div key={sub.id} className="finance-row" style={{ gap: 8 }}>
-                  <span className="finance-row-name">{sub.name}</span>
-                  <span className="sub-cycle">{sub.billing_cycle}</span>
-                  <span className="finance-row-value">{fmtDec(sub.amount)}</span>
-                  {sub.next_renewal && (
-                    <span className="finance-row-meta">Renews {fmtDate(sub.next_renewal)}</span>
-                  )}
-                  <button className="icon-btn danger" onClick={() => deleteSub(sub.id)} title="Delete">✕</button>
-                </div>
-              ))}
+              {sortedSubs.map(sub => {
+                const days = daysUntil(sub.next_renewal);
+                const urgent = days !== null && days >= 0 && days <= 7;
+                const moAmt = toMonthly(sub.amount, sub.billing_cycle);
+                const yrAmt = toYearly(sub.amount, sub.billing_cycle);
+                return (
+                  <div key={sub.id} className={`finance-row${urgent ? ' sub-urgent' : ''}`} style={{ gap: 8 }}>
+                    <span className="finance-row-name">{sub.name}</span>
+                    <span className="sub-cycle">{sub.billing_cycle}</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="finance-row-value" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{fmtDec(moAmt)}<span style={{ fontSize: 10, color: 'var(--text-tertiary)', fontWeight: 400 }}>/mo</span></div>
+                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{fmtDec(yrAmt)}/yr</div>
+                    </div>
+                    {sub.next_renewal && (
+                      <span className="finance-row-meta" style={urgent ? { color: '#F2C063', fontWeight: 600, whiteSpace: 'nowrap' } : { whiteSpace: 'nowrap' }}>
+                        {urgent ? (days === 0 ? 'today' : `in ${days}d`) : `Renews ${fmtDate(sub.next_renewal)}`}
+                      </span>
+                    )}
+                    <button className="icon-btn danger" onClick={() => deleteSub(sub.id)} title="Delete">✕</button>
+                  </div>
+                );
+              })}
               {addingSub ? (
                 <div className="add-form" style={{ marginTop: 12 }}>
                   <input className="text-input" placeholder="Name (e.g. Netflix)" value={subForm.name} onChange={e => setSubForm(f => ({ ...f, name: e.target.value }))} autoFocus style={{ fontSize: 13, padding: '8px 12px' }} />
