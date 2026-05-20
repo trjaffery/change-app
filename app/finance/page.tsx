@@ -97,7 +97,7 @@ function PlaidLinkButton({ onSuccess }: { onSuccess: () => void }) {
   }
 
   const { open, ready } = usePlaidLink({
-    token: linkToken ?? '',
+    token: linkToken,
     onSuccess: async (public_token, metadata) => {
       await fetch('/api/plaid/exchange-token', {
         method: 'POST',
@@ -217,17 +217,25 @@ export default function FinancePage() {
     return acc;
   }, {} as Record<Category, number>);
 
-  const plaidTotal = plaidConns.flatMap(c => c.accounts).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+  const allPlaidAccounts = plaidConns.flatMap(c => c.accounts);
+  const isLiability = (a: PlaidAccount) => a.type === 'credit' || a.type === 'loan';
+  const isInvestment = (a: PlaidAccount) => a.type === 'investment';
+
+  const plaidBank = allPlaidAccounts.filter(a => !isLiability(a) && !isInvestment(a)).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+  const plaidInvestments = allPlaidAccounts.filter(isInvestment).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+  const plaidLiabilities = allPlaidAccounts.filter(isLiability).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+
   const manualTotal = Object.values(byCategory).reduce((s, v) => s + v, 0);
-  const totalNetWorth = manualTotal + plaidTotal;
+  const totalAssets = manualTotal + plaidBank + plaidInvestments;
+  const totalNetWorth = totalAssets - plaidLiabilities;
 
   const monthlyBurn = subs.reduce((s, sub) => s + toMonthly(sub.amount, sub.billing_cycle), 0);
   const totalOrders = orders.reduce((s, o) => s + o.amount, 0);
   const totalWishlist = wishlist.reduce((s, w) => s + w.amount, 0);
 
   const donutData = ([
-    { label: 'Bank', value: byCategory.bank + plaidTotal, color: CATEGORY_META.bank.color },
-    { label: 'Stocks', value: byCategory.stocks, color: CATEGORY_META.stocks.color },
+    { label: 'Bank', value: byCategory.bank + plaidBank, color: CATEGORY_META.bank.color },
+    { label: 'Stocks', value: byCategory.stocks + plaidInvestments, color: CATEGORY_META.stocks.color },
     { label: 'Crypto', value: byCategory.crypto, color: CATEGORY_META.crypto.color },
     { label: 'Other', value: byCategory.other, color: CATEGORY_META.other.color },
   ]).filter(d => d.value > 0);
@@ -453,16 +461,23 @@ export default function FinancePage() {
                 <div className="nw-summary">
                   <DonutChart data={donutData} />
                   <div className="nw-legend">
-                    {([['bank', byCategory.bank + plaidTotal], ['stocks', byCategory.stocks], ['crypto', byCategory.crypto], ['other', byCategory.other]] as [Category, number][]).map(([cat, val]) => (
+                    {([['bank', byCategory.bank + plaidBank], ['stocks', byCategory.stocks + plaidInvestments], ['crypto', byCategory.crypto], ['other', byCategory.other]] as [Category, number][]).map(([cat, val]) => (
                       <div key={cat} className="legend-row">
                         <div className="legend-dot" style={{ background: CATEGORY_META[cat].color }} />
                         <span className="legend-label">{CATEGORY_META[cat].label}</span>
                         <span className="legend-val">{fmt(val)}</span>
-                        {totalNetWorth > 0 && (
-                          <span className="legend-pct">{Math.round(val / totalNetWorth * 100)}%</span>
+                        {totalAssets > 0 && val > 0 && (
+                          <span className="legend-pct">{Math.round(val / totalAssets * 100)}%</span>
                         )}
                       </div>
                     ))}
+                    {plaidLiabilities > 0 && (
+                      <div className="legend-row">
+                        <div className="legend-dot" style={{ background: 'var(--danger)' }} />
+                        <span className="legend-label">Liabilities</span>
+                        <span className="legend-val" style={{ color: 'var(--danger)' }}>−{fmt(plaidLiabilities)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -553,21 +568,37 @@ export default function FinancePage() {
                     Connect your bank to automatically sync balances.
                   </p>
                 ) : (
-                  plaidConns.map(conn => (
-                    <div key={conn.item_id} className="plaid-conn">
-                      <div className="plaid-inst">
-                        <span>{conn.institution_name ?? 'Bank'}</span>
-                        <button className="icon-btn danger" style={{ fontSize: 11 }} onClick={() => disconnectPlaid(conn.item_id)}>Disconnect</button>
-                      </div>
-                      {conn.accounts.map(acc => (
-                        <div key={acc.account_id} className="finance-row">
-                          <span className="finance-row-name">{acc.name}</span>
-                          <span className="finance-row-meta" style={{ textTransform: 'capitalize' }}>{acc.subtype}</span>
-                          <span className="finance-row-value">{acc.balances.current !== null ? fmt(acc.balances.current) : '—'}</span>
+                  plaidConns.map(conn => {
+                    const assets = conn.accounts.filter(a => !isLiability(a));
+                    const liabilities = conn.accounts.filter(isLiability);
+                    return (
+                      <div key={conn.item_id} className="plaid-conn">
+                        <div className="plaid-inst">
+                          <span>{conn.institution_name ?? 'Bank'}</span>
+                          <button className="icon-btn danger" style={{ fontSize: 11 }} onClick={() => disconnectPlaid(conn.item_id)}>Disconnect</button>
                         </div>
-                      ))}
-                    </div>
-                  ))
+                        {assets.map(acc => (
+                          <div key={acc.account_id} className="finance-row">
+                            <span className="finance-row-name">{acc.name}</span>
+                            <span className="finance-row-meta" style={{ textTransform: 'capitalize' }}>{acc.subtype}</span>
+                            <span className="finance-row-value">{acc.balances.current !== null ? fmt(acc.balances.current) : '—'}</span>
+                          </div>
+                        ))}
+                        {liabilities.length > 0 && (
+                          <>
+                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--danger)', opacity: 0.7, margin: '8px 0 4px 2px' }}>Liabilities</div>
+                            {liabilities.map(acc => (
+                              <div key={acc.account_id} className="finance-row" style={{ background: 'rgba(255,107,107,0.04)' }}>
+                                <span className="finance-row-name">{acc.name}</span>
+                                <span className="finance-row-meta" style={{ textTransform: 'capitalize' }}>{acc.subtype}</span>
+                                <span className="finance-row-value" style={{ color: 'var(--danger)' }}>−{acc.balances.current !== null ? fmt(acc.balances.current) : '—'}</span>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
                 <PlaidLinkButton onSuccess={fetchPlaid} />
               </div>
