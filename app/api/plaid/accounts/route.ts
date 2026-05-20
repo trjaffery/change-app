@@ -14,9 +14,12 @@ interface PlaidAccount {
   balances: { current: number | null; available: number | null };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const sb = supabaseServer();
-  const { data: connections, error } = await sb.from('plaid_connections').select('*');
+  const itemId = req.nextUrl.searchParams.get('item_id');
+  let query = sb.from('plaid_connections').select('*');
+  if (itemId) query = query.eq('item_id', itemId) as typeof query;
+  const { data: connections, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!connections?.length) return NextResponse.json([]);
 

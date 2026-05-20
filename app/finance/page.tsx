@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 
 type Tab = 'networth' | 'subscriptions' | 'orders' | 'wishlist';
@@ -9,7 +9,7 @@ interface FinanceItem { id: string; category: Category; name: string; value: num
 interface Subscription { id: string; name: string; amount: number; billing_cycle: string; next_renewal: string | null }
 interface Order { id: string; name: string; amount: number; store: string | null; eta: string | null }
 interface WishlistItem { id: string; name: string; amount: number; url: string | null }
-interface PlaidAccount { account_id: string; name: string; type: string; subtype: string; balances: { current: number | null } }
+interface PlaidAccount { account_id: string; name: string; type: string; subtype: string; balances: { current: number | null; available: number | null } }
 interface PlaidConnection { institution_name: string | null; item_id: string; accounts: PlaidAccount[] }
 interface SubCandidate { name: string; amount: number; billing_cycle: string; next_renewal: string; occurrences: number }
 
@@ -40,12 +40,12 @@ function toMonthly(amount: number, cycle: string) {
   return amount;
 }
 
-function DonutChart({ data }: { data: { label: string; value: number; color: string }[] }) {
+function DonutChart({ data, netWorth }: { data: { label: string; value: number; color: string }[]; netWorth: number }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (total <= 0) return null;
-  const r = 52;
-  const cx = 70;
-  const cy = 70;
+  const r = 58;
+  const cx = 80;
+  const cy = 80;
   const circ = 2 * Math.PI * r;
   let cumulative = 0;
   const segments = data.filter(d => d.value > 0).map(d => {
@@ -56,25 +56,68 @@ function DonutChart({ data }: { data: { label: string; value: number; color: str
     return seg;
   });
   return (
-    <svg width="140" height="140" viewBox="0 0 140 140" style={{ flexShrink: 0 }}>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="16" />
+    <svg width="160" height="160" viewBox="0 0 160 160" style={{ flexShrink: 0 }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="18" />
       {segments.map(s => (
         <circle
           key={s.label}
           cx={cx} cy={cy} r={r}
           fill="none"
           stroke={s.color}
-          strokeWidth="16"
+          strokeWidth="18"
           strokeDasharray={`${s.dash} ${s.gap}`}
           strokeDashoffset={circ / 4 - s.offset}
           strokeLinecap="round"
         />
       ))}
-      <text x={cx} y={cy - 5} textAnchor="middle" fill="#FAFAFA" fontSize="10" fontWeight="700" fontFamily="-apple-system,sans-serif">
-        {fmt(total)}
+      <text x={cx} y={cy - 6} textAnchor="middle" fill={netWorth < 0 ? '#FF6B6B' : '#FAFAFA'} fontSize="15" fontWeight="700" fontFamily="-apple-system,sans-serif">
+        {netWorth < 0 ? '−' : ''}{fmt(Math.abs(netWorth))}
       </text>
-      <text x={cx} y={cy + 10} textAnchor="middle" fill="#76746E" fontSize="8" fontFamily="-apple-system,sans-serif">
+      <text x={cx} y={cy + 12} textAnchor="middle" fill="#76746E" fontSize="10" fontFamily="-apple-system,sans-serif">
         net worth
+      </text>
+    </svg>
+  );
+}
+
+function NWChart({ data }: { data: { total: number; snapshot_date: string }[] }) {
+  if (data.length < 2) return null;
+  const W = 600, H = 90, PX = 8, PT = 14, PB = 18;
+  const innerW = W - PX * 2;
+  const innerH = H - PT - PB;
+  const min = Math.min(...data.map(d => d.total));
+  const max = Math.max(...data.map(d => d.total));
+  const range = max - min || 1;
+  const pts = data.map((d, i) => ({
+    x: PX + (i / (data.length - 1)) * innerW,
+    y: PT + innerH - ((d.total - min) / range) * innerH,
+    ...d,
+  }));
+  const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
+  const rising = data[data.length - 1].total >= data[0].total;
+  const color = rising ? '#6BE3A4' : '#FF6B6B';
+  const last = pts[pts.length - 1];
+  const labelX = Math.min(last.x, W - 50);
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', marginTop: 8 }}>
+      <defs>
+        <linearGradient id="nwg" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={`${PX},${PT + innerH} ${polyline} ${PX + innerW},${PT + innerH}`} fill="url(#nwg)" />
+      <polyline points={polyline} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[0].x} cy={pts[0].y} r="2.5" fill={color} opacity="0.5" />
+      <circle cx={last.x} cy={last.y} r="3.5" fill={color} />
+      <text x={PX} y={H - 3} fill="#76746E" fontSize="9" fontFamily="-apple-system,sans-serif">
+        {new Date(data[0].snapshot_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+      </text>
+      <text x={W - PX} y={H - 3} fill="#76746E" fontSize="9" textAnchor="end" fontFamily="-apple-system,sans-serif">
+        {new Date(data[data.length - 1].snapshot_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+      </text>
+      <text x={labelX} y={last.y - 7} fill={color} fontSize="10" fontWeight="700" textAnchor="middle" fontFamily="-apple-system,sans-serif">
+        {last.total < 0 ? '−' : ''}{fmt(Math.abs(last.total))}
       </text>
     </svg>
   );
@@ -145,6 +188,12 @@ export default function FinancePage() {
   const [addingSub, setAddingSub] = useState(false);
   const [subForm, setSubForm] = useState({ name: '', amount: '', billing_cycle: 'monthly', next_renewal: '' });
 
+  // Expanded Plaid account rows in category sections
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
+  function toggleAccount(id: string) {
+    setExpandedAccounts(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
   // Subscription scan
   const [scanLoading, setScanLoading] = useState(false);
   const [candidates, setCandidates] = useState<SubCandidate[] | null>(null);
@@ -164,6 +213,11 @@ export default function FinancePage() {
 
   // Plaid
   const [plaidConns, setPlaidConns] = useState<PlaidConnection[]>([]);
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
+
+  // NW history
+  const [nwHistory, setNwHistory] = useState<{ total: number; snapshot_date: string }[]>([]);
+  const hasSnapshotted = useRef(false);
 
   const fetchItems = useCallback(async () => {
     setItemsLoading(true);
@@ -197,11 +251,46 @@ export default function FinancePage() {
     setWishlistLoading(false);
   }, []);
 
-  const fetchPlaid = useCallback(async () => {
+  const fetchPlaid = useCallback(async (): Promise<PlaidConnection[]> => {
     const res = await fetch('/api/plaid/accounts');
     const d = await res.json() as PlaidConnection[];
-    setPlaidConns(Array.isArray(d) ? d : []);
+    const conns = Array.isArray(d) ? d : [];
+    setPlaidConns(conns);
+    return conns;
   }, []);
+
+  const fetchNWHistory = useCallback(async () => {
+    const res = await fetch('/api/finance/nw-history');
+    const d = await res.json() as { total: number; snapshot_date: string }[];
+    setNwHistory(Array.isArray(d) ? d : []);
+  }, []);
+
+  async function snapshotNW(total: number) {
+    await fetch('/api/finance/nw-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ total }),
+    });
+    fetchNWHistory();
+  }
+
+  async function syncAccount(item_id: string) {
+    setSyncingIds(prev => new Set(prev).add(item_id));
+    const res = await fetch(`/api/plaid/accounts?item_id=${item_id}`);
+    const updated = await res.json() as PlaidConnection[];
+    setPlaidConns(prev => prev.map(c => {
+      const fresh = updated.find(u => u.item_id === c.item_id);
+      return fresh ?? c;
+    }));
+    // recompute total with updated connection merged in
+    const merged = plaidConns.map(c => { const f = updated.find(u => u.item_id === c.item_id); return f ?? c; });
+    const allAcc = merged.flatMap(c => c.accounts);
+    const isLiab = (a: PlaidAccount) => a.type === 'credit' || a.type === 'loan';
+    const assets = allAcc.filter(a => !isLiab(a)).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+    const liabs = allAcc.filter(isLiab).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+    await snapshotNW(manualTotal + assets - liabs);
+    setSyncingIds(prev => { const n = new Set(prev); n.delete(item_id); return n; });
+  }
 
   useEffect(() => {
     fetchItems();
@@ -209,7 +298,8 @@ export default function FinancePage() {
     fetchOrders();
     fetchWishlist();
     fetchPlaid();
-  }, [fetchItems, fetchSubs, fetchOrders, fetchWishlist, fetchPlaid]);
+    fetchNWHistory();
+  }, [fetchItems, fetchSubs, fetchOrders, fetchWishlist, fetchPlaid, fetchNWHistory]);
 
   // Computed totals
   const byCategory = (['bank', 'stocks', 'crypto', 'other'] as Category[]).reduce((acc, cat) => {
@@ -228,6 +318,15 @@ export default function FinancePage() {
   const manualTotal = Object.values(byCategory).reduce((s, v) => s + v, 0);
   const totalAssets = manualTotal + plaidBank + plaidInvestments;
   const totalNetWorth = totalAssets - plaidLiabilities;
+
+  // Auto-snapshot once per page load after both items and plaid are ready
+  useEffect(() => {
+    if (!itemsLoading && !hasSnapshotted.current && (items.length > 0 || plaidConns.length > 0)) {
+      hasSnapshotted.current = true;
+      snapshotNW(totalNetWorth);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemsLoading, plaidConns]);
 
   const monthlyBurn = subs.reduce((s, sub) => s + toMonthly(sub.amount, sub.billing_cycle), 0);
   const totalOrders = orders.reduce((s, o) => s + o.amount, 0);
@@ -459,7 +558,7 @@ export default function FinancePage() {
               {/* Summary + donut */}
               <div className="card" style={{ marginBottom: 16 }}>
                 <div className="nw-summary">
-                  <DonutChart data={donutData} />
+                  <DonutChart data={donutData} netWorth={totalNetWorth} />
                   <div className="nw-legend">
                     {([['bank', byCategory.bank + plaidBank], ['stocks', byCategory.stocks + plaidInvestments], ['crypto', byCategory.crypto], ['other', byCategory.other]] as [Category, number][]).map(([cat, val]) => (
                       <div key={cat} className="legend-row">
@@ -480,12 +579,26 @@ export default function FinancePage() {
                     )}
                   </div>
                 </div>
+                {nwHistory.length >= 2 && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <NWChart data={nwHistory} />
+                  </div>
+                )}
               </div>
 
               {/* Category sections */}
               {(['bank', 'stocks', 'crypto', 'other'] as Category[]).map(cat => {
+                const PLAID_CAT: Record<string, Category> = { depository: 'bank', investment: 'stocks', other: 'other' };
                 const catItems = items.filter(i => i.category === cat);
-                const catTotal = catItems.reduce((s, i) => s + i.value, 0);
+                const plaidAccounts = allPlaidAccounts.filter(a => !isLiability(a) && PLAID_CAT[a.type] === cat);
+                const plaidBankNet = cat === 'bank'
+                  ? plaidConns.reduce((s, conn) => {
+                      const a = conn.accounts.filter(a => !isLiability(a) && !isInvestment(a)).reduce((x, a) => x + (a.balances.current ?? 0), 0);
+                      const l = conn.accounts.filter(isLiability).reduce((x, a) => x + (a.balances.current ?? 0), 0);
+                      return s + a - l;
+                    }, 0)
+                  : plaidAccounts.reduce((s, a) => s + (a.balances.current ?? 0), 0);
+                const catTotal = catItems.reduce((s, i) => s + i.value, 0) + plaidBankNet;
                 const meta = CATEGORY_META[cat];
                 return (
                   <div key={cat} className="cat-section">
@@ -504,7 +617,7 @@ export default function FinancePage() {
                       </div>
                     </div>
 
-                    {catItems.length === 0 && addingCat !== cat && (
+                    {catItems.length === 0 && (cat === 'bank' ? plaidConns.length === 0 : plaidAccounts.length === 0) && addingCat !== cat && (
                       <div className="empty-state" style={{ textAlign: 'left', paddingLeft: 2 }}>No entries</div>
                     )}
 
@@ -528,6 +641,79 @@ export default function FinancePage() {
                               <button className="icon-btn danger" onClick={() => deleteItem(item.id)} title="Delete">✕</button>
                             </div>
                           </>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Plaid accounts — institution groups for Bank, flat list for other categories */}
+                    {cat === 'bank' ? plaidConns.map(conn => {
+                      const depsAssets = conn.accounts.filter(a => !isLiability(a) && !isInvestment(a));
+                      const connLiabilities = conn.accounts.filter(isLiability);
+                      const connNet = depsAssets.reduce((s, a) => s + (a.balances.current ?? 0), 0)
+                                    - connLiabilities.reduce((s, a) => s + (a.balances.current ?? 0), 0);
+                      const expanded = expandedAccounts.has(conn.item_id);
+                      return (
+                        <div key={conn.item_id}>
+                          <div className="finance-row" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleAccount(conn.item_id)}>
+                            <span className="finance-row-name">{conn.institution_name ?? 'Bank'}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text-tertiary)', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 4 }}>auto</span>
+                            <span className="finance-row-value" style={{ color: connNet < 0 ? 'var(--danger)' : 'var(--text-primary)' }}>
+                              {connNet < 0 ? '−' : ''}{fmt(Math.abs(connNet))}
+                            </span>
+                            <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{expanded ? '▲' : '▼'}</span>
+                          </div>
+                          {expanded && (
+                            <div style={{ padding: '10px 14px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '0 0 10px 10px', marginTop: -4, marginBottom: 4 }}>
+                              {depsAssets.length > 0 && (
+                                <>
+                                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--success)', opacity: 0.7, marginBottom: 6 }}>Assets</div>
+                                  {depsAssets.map(acc => (
+                                    <div key={acc.account_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                                      <span style={{ color: 'var(--text-secondary)' }}>{acc.name}</span>
+                                      <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{acc.balances.current !== null ? fmtDec(acc.balances.current) : '—'}</span>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+                              {connLiabilities.length > 0 && (
+                                <>
+                                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--danger)', opacity: 0.7, margin: '10px 0 6px' }}>Liabilities</div>
+                                  {connLiabilities.map(acc => (
+                                    <div key={acc.account_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                                      <span style={{ color: 'var(--text-secondary)' }}>{acc.name}</span>
+                                      <span style={{ color: 'var(--danger)', fontWeight: 600 }}>−{acc.balances.current !== null ? fmtDec(acc.balances.current) : '—'}</span>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }) : plaidAccounts.map(acc => (
+                      <div key={acc.account_id}>
+                        <div className="finance-row" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleAccount(acc.account_id)}>
+                          <span className="finance-row-name">{acc.name}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text-tertiary)', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 4 }}>auto</span>
+                          <span className="finance-row-value">{acc.balances.current !== null ? fmt(acc.balances.current) : '—'}</span>
+                          <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{expandedAccounts.has(acc.account_id) ? '▲' : '▼'}</span>
+                        </div>
+                        {expandedAccounts.has(acc.account_id) && (
+                          <div style={{ padding: '10px 14px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '0 0 10px 10px', marginTop: -4, marginBottom: 4 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'capitalize', marginBottom: 8 }}>{acc.subtype}</div>
+                            <div style={{ display: 'flex', gap: 20 }}>
+                              <div>
+                                <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Current</div>
+                                <div style={{ fontSize: 14, fontWeight: 700 }}>{acc.balances.current !== null ? fmtDec(acc.balances.current) : '—'}</div>
+                              </div>
+                              {acc.balances.available !== null && acc.balances.available !== acc.balances.current && (
+                                <div>
+                                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Available</div>
+                                  <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtDec(acc.balances.available)}</div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -568,37 +754,19 @@ export default function FinancePage() {
                     Connect your bank to automatically sync balances.
                   </p>
                 ) : (
-                  plaidConns.map(conn => {
-                    const assets = conn.accounts.filter(a => !isLiability(a));
-                    const liabilities = conn.accounts.filter(isLiability);
-                    return (
-                      <div key={conn.item_id} className="plaid-conn">
-                        <div className="plaid-inst">
-                          <span>{conn.institution_name ?? 'Bank'}</span>
-                          <button className="icon-btn danger" style={{ fontSize: 11 }} onClick={() => disconnectPlaid(conn.item_id)}>Disconnect</button>
-                        </div>
-                        {assets.map(acc => (
-                          <div key={acc.account_id} className="finance-row">
-                            <span className="finance-row-name">{acc.name}</span>
-                            <span className="finance-row-meta" style={{ textTransform: 'capitalize' }}>{acc.subtype}</span>
-                            <span className="finance-row-value">{acc.balances.current !== null ? fmt(acc.balances.current) : '—'}</span>
-                          </div>
-                        ))}
-                        {liabilities.length > 0 && (
-                          <>
-                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--danger)', opacity: 0.7, margin: '8px 0 4px 2px' }}>Liabilities</div>
-                            {liabilities.map(acc => (
-                              <div key={acc.account_id} className="finance-row" style={{ background: 'rgba(255,107,107,0.04)' }}>
-                                <span className="finance-row-name">{acc.name}</span>
-                                <span className="finance-row-meta" style={{ textTransform: 'capitalize' }}>{acc.subtype}</span>
-                                <span className="finance-row-value" style={{ color: 'var(--danger)' }}>−{acc.balances.current !== null ? fmt(acc.balances.current) : '—'}</span>
-                              </div>
-                            ))}
-                          </>
-                        )}
-                      </div>
-                    );
-                  })
+                  plaidConns.map(conn => (
+                    <div key={conn.item_id} className="finance-row">
+                      <span className="finance-row-name">{conn.institution_name ?? 'Bank'}</span>
+                      <button
+                        className="icon-btn"
+                        style={{ fontSize: 13 }}
+                        onClick={() => syncAccount(conn.item_id)}
+                        disabled={syncingIds.has(conn.item_id)}
+                        title="Sync"
+                      >{syncingIds.has(conn.item_id) ? '…' : '⟳'}</button>
+                      <button className="icon-btn danger" style={{ fontSize: 12 }} onClick={() => disconnectPlaid(conn.item_id)} title="Disconnect">✕</button>
+                    </div>
+                  ))
                 )}
                 <PlaidLinkButton onSuccess={fetchPlaid} />
               </div>
