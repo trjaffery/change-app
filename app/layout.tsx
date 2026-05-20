@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" style={{ height: '100%' }}>
-      <body>
+      <body suppressHydrationWarning>
         <div className="grain" />
         <Sidebar />
         <main className="main-content">
