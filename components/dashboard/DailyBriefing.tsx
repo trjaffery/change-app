@@ -34,7 +34,7 @@ export default function DailyBriefing() {
     setLoading(false);
   }
 
-  useEffect(() => { generate(); }, []);
+  useEffect(() => { generate(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
@@ -51,7 +51,7 @@ export default function DailyBriefing() {
       `}</style>
       <div className="briefing-card">
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--success)', marginBottom: 10, opacity: 0.8 }}>
-          Today's Briefing
+          Today&apos;s Briefing
         </div>
         {loading ? (
           <>

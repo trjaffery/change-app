@@ -17,10 +17,12 @@ export default function HabitCoach() {
 
   async function analyse() {
     setLoading(true);
-    const res = await fetch('/api/ai/habit-coach', { method: 'POST' });
-    const json = await res.json();
-    setData(json);
-    setLoading(false);
+    try {
+      const res = await fetch('/api/ai/habit-coach', { method: 'POST' });
+      const json = await res.json();
+      setData(json);
+    } catch { /* leave data unchanged on failure */ }
+    finally { setLoading(false); }
   }
 
   return (

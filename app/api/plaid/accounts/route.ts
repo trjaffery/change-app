@@ -9,6 +9,7 @@ interface PlaidAccount {
   account_id: string;
   name: string;
   official_name: string | null;
+  mask: string | null;
   type: string;
   subtype: string;
   balances: { current: number | null; available: number | null };

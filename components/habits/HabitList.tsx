@@ -58,7 +58,7 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   const [goalValue, setGoalValue] = useState(1);
 
   const onCompletionChangeRef = useRef(onCompletionChange);
-  onCompletionChangeRef.current = onCompletionChange;
+  useEffect(() => { onCompletionChangeRef.current = onCompletionChange; }, [onCompletionChange]);
 
   const fetchHabits = useCallback(async () => {
     try {

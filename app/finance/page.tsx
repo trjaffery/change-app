@@ -2,16 +2,113 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 
-type Tab = 'networth' | 'subscriptions' | 'orders' | 'wishlist';
+function cacheSet(key: string, data: unknown, ttlMs: number) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ data, expires: Date.now() + ttlMs }));
+  } catch { /* storage full — ignore */ }
+}
+function cacheGet<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { data, expires } = JSON.parse(raw) as { data: T; expires: number };
+    if (Date.now() > expires) { localStorage.removeItem(key); return null; }
+    return data;
+  } catch { return null; }
+}
+
+type Tab = 'networth' | 'subscriptions' | 'orders' | 'wishlist' | 'transactions';
 type Category = 'bank' | 'stocks' | 'crypto' | 'other';
 
 interface FinanceItem { id: string; category: Category; name: string; value: number }
 interface Subscription { id: string; name: string; amount: number; billing_cycle: string; next_renewal: string | null }
 interface Order { id: string; name: string; amount: number; store: string | null; eta: string | null }
 interface WishlistItem { id: string; name: string; amount: number; url: string | null }
-interface PlaidAccount { account_id: string; name: string; type: string; subtype: string; balances: { current: number | null; available: number | null } }
+interface PlaidAccount { account_id: string; name: string; official_name: string | null; mask: string | null; type: string; subtype: string; balances: { current: number | null; available: number | null } }
 interface PlaidConnection { institution_name: string | null; item_id: string; accounts: PlaidAccount[] }
 interface SubCandidate { name: string; amount: number; billing_cycle: string; next_renewal: string; occurrences: number }
+interface PlaidTx { transaction_id: string; account_id?: string; merchant_name: string | null; name: string; amount: number; date: string; category: string[] | null; personal_finance_category?: { primary: string; detailed: string; confidence_level: string } | null; pending?: boolean }
+
+const CAT_COLORS = ['#F2C063', '#6BE3A4', '#9B8EF7', '#60C6F0', '#F26363', '#FF9A5C', '#78B4FF', '#E07BB5'];
+
+const PFC_MAP: Record<string, string> = {
+  'FOOD_AND_DRINK':            'Food & Drink',
+  'GENERAL_MERCHANDISE':       'Shopping',
+  'HOME_IMPROVEMENT':          'Shopping',
+  'ENTERTAINMENT':             'Entertainment',
+  'TRANSPORTATION':            'Transport',
+  'TRAVEL':                    'Travel',
+  'MEDICAL':                   'Health & Fitness',
+  'PERSONAL_CARE':             'Personal Care',
+  'GENERAL_SERVICES':          'Bills & Utilities',
+  'RENT_AND_UTILITIES':        'Bills & Utilities',
+  'GOVERNMENT_AND_NON_PROFIT': 'Other',
+  'INCOME':                    'Other',
+  'TRANSFER_IN':               'Other',
+  'TRANSFER_OUT':              'Other',
+  'LOAN_PAYMENTS':             'Other',
+  'BANK_FEES':                 'Other',
+};
+
+function inferCategory(name: string, merchant: string | null): string {
+  const s = (merchant ?? name).toLowerCase();
+  // Delivery apps classify as Food
+  if (/uber eats|doordash|grubhub|instacart|postmates|door dash|seamless|caviar|gopuff/.test(s)) return 'Food & Drink';
+  // Food: TST* prefix, common food keywords
+  if (/tst\*|restaurant|cafe|coffee|donut|pizza|burger|taco|sushi|grill|diner|bistro|bakery|bbq|wing|sandwich|noodle|ramen|thai|chinese|mexican|italian|steakhouse|steak|smoothie|juice|boba|\btea\b|braum|ice cream|sweetie|creamery|gelato|frozen yogurt|dessert|dairy queen|cold stone|baskin|shake|candy|pastry|crepe|dutch bros|jamba|tropical smoothie|applebee|panera|ihop|denny|waffle house|chili|cracker barrel|buffalo wild|chicken|gyro|seafood|eatery|kitchen|brunch|breakfast|tavern|toast|waffle|pancake|bagel|deli|whataburger|chick-fil|chipotle|subway|starbucks|dunkin|mcdonald|wendy|taco bell|panda express|five guys|sonic |in-n-out|raising cane|food|dining/.test(s)) return 'Food & Drink';
+  // Grocery
+  if (/kroger|heb |h-e-b|whole foods|trader joe|aldi|publix|safeway|sprouts|walmart grocery|costco food|sam's club|grocery|supermarket/.test(s)) return 'Groceries';
+  // Shopping / Retail
+  if (/amazon|walmart|target|costco|best buy|bestbuy|ebay|etsy|nike|adidas|gap |zara|h&m|nordstrom|macy|kohl|tj maxx|marshall|ross |old navy|forever 21|uniqlo|clothing|apparel|fashion|boutique|merchandise/.test(s)) return 'Shopping';
+  // Rideshare / transport (non-food uber)
+  if (/uber|lyft|taxi|rideshare|transit|toll|train|amtrak|parking|metro /.test(s)) return 'Transport';
+  // Travel
+  if (/airline|delta|united|southwest|american air|jetblue|spirit air|frontier|hotel|marriott|hilton|hyatt|airbnb|vrbo|expedia|booking\.com|priceline|travel|flight|airport|rental car|hertz|enterprise|avis/.test(s)) return 'Travel';
+  // Entertainment
+  if (/netflix|hulu|disney|hbo|max |spotify|apple music|amazon prime|youtube|twitch|playstation|xbox|steam|nintendo|movie|cinema|theater|ticketmaster|stubhub|concert|entertainment|recreation/.test(s)) return 'Entertainment';
+  // Fitness
+  if (/gym|fitness|planet fitness|crossfit|peloton|anytime fitness|la fitness|24 hour/.test(s)) return 'Health & Fitness';
+  // Health / Medical
+  if (/cvs|walgreens|rite aid|pharmacy|doctor|hospital|dental|clinic|health|medical|vision|optom|chiropract|therapy|urgent care/.test(s)) return 'Health & Fitness';
+  // Gas / Auto
+  if (/racetrac|shell |exxon|chevron|bp |mobil|sunoco|marathon|speedway|gas station|fuel|autozone|jiffy lube|oil change|car wash|mechanic|tires|midas|firestone|napa auto/.test(s)) return 'Transport';
+  // Bills / Utilities
+  if (/at&t|verizon|t-mobile|tmobile|sprint|comcast|xfinity|spectrum|cox |dish |directv|utility|electric|water bill|sewer|internet|cable|wireless|phone bill/.test(s)) return 'Bills & Utilities';
+  // Software / Subscriptions
+  if (/claude|openai|chatgpt|microsoft|google one|icloud|dropbox|adobe|slack|zoom|notion|github|aws |azure|digital ocean|software|saas/.test(s)) return 'Software';
+  // Personal Care
+  if (/salon|spa|barber|hair |nail |beauty|skincare|sephora|ulta|massage|wax/.test(s)) return 'Personal Care';
+  return 'Other';
+}
+
+// PFC categories that are too broad to trust alone — refine with regex
+const VAGUE_PFC = new Set(['GENERAL_MERCHANDISE', 'GENERAL_SERVICES']);
+
+function txCat(tx: { name: string; merchant_name: string | null; category: string[] | null; personal_finance_category?: { primary: string } | null }): string {
+  const pfc = tx.personal_finance_category?.primary;
+  // Specific PFC categories — trust them completely
+  if (pfc && !VAGUE_PFC.has(pfc)) return PFC_MAP[pfc] ?? 'Other';
+  // Vague or missing PFC — try regex refinement first
+  const inferred = inferCategory(tx.name, tx.merchant_name);
+  if (inferred !== 'Other') return inferred;
+  // Regex couldn't improve on it — fall back to vague PFC or legacy category
+  if (pfc) return PFC_MAP[pfc] ?? 'Other';
+  return tx.category?.[0] ?? 'Other';
+}
+
+function getCatEmoji(cat: string): string {
+  const c = cat.toLowerCase();
+  if (/food|drink|restaurant|dining|grocer/.test(c)) return '🍔';
+  if (/shop|retail|clothing|merchandise/.test(c)) return '🛍️';
+  if (/travel|airline|hotel|flight/.test(c)) return '✈️';
+  if (/transport|uber|lyft|transit|parking|gas|fuel|auto/.test(c)) return '🚗';
+  if (/entertain|recreation|movie|game/.test(c)) return '🎮';
+  if (/health|medical|pharmacy|doctor|dental|fitness|gym/.test(c)) return '🏥';
+  if (/bill|utilit|phone|internet|cable/.test(c)) return '🏠';
+  if (/software|subscription|saas|cloud/.test(c)) return '💻';
+  if (/personal care|beauty|salon|spa/.test(c)) return '💅';
+  return '💳';
+}
 
 const CATEGORY_META: Record<Category, { label: string; color: string; icon: string }> = {
   bank:    { label: 'Bank',    color: '#6BE3A4', icon: '◉' },
@@ -59,14 +156,12 @@ function DonutChart({ data, netWorth }: { data: { label: string; value: number; 
   const cx = 80;
   const cy = 80;
   const circ = 2 * Math.PI * r;
-  let cumulative = 0;
-  const segments = data.filter(d => d.value > 0).map(d => {
-    const pct = d.value / total;
-    const dash = pct * circ;
-    const seg = { ...d, dash, gap: circ - dash, offset: cumulative };
-    cumulative += dash;
-    return seg;
-  });
+  const segments = data.filter(d => d.value > 0).reduce<Array<typeof data[number] & { dash: number; gap: number; offset: number }>>((acc, d) => {
+    const dash = (d.value / total) * circ;
+    const offset = acc.length === 0 ? 0 : acc[acc.length - 1].offset + acc[acc.length - 1].dash;
+    acc.push({ ...d, dash, gap: circ - dash, offset });
+    return acc;
+  }, []);
   return (
     <svg width="160" height="160" viewBox="0 0 160 160" style={{ flexShrink: 0 }}>
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="18" />
@@ -160,6 +255,8 @@ function PlaidLinkButton({ onSuccess }: { onSuccess: () => void }) {
         body: JSON.stringify({ public_token, metadata }),
       });
       setLinkToken(null);
+      localStorage.removeItem('plaid_accounts');
+      localStorage.removeItem('plaid_transactions');
       onSuccess();
     },
     onExit: () => setLinkToken(null),
@@ -235,6 +332,16 @@ export default function FinancePage() {
   const [plaidConns, setPlaidConns] = useState<PlaidConnection[]>([]);
   const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
 
+  // Transactions
+  const [transactions, setTransactions] = useState<PlaidTx[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [txFilter, setTxFilter] = useState<string | null>(null);
+  const [expandedTx, setExpandedTx] = useState<string | null>(null);
+  const txFetched = useRef(false);
+  const subsFetched = useRef(false);
+  const ordersFetched = useRef(false);
+  const wishlistFetched = useRef(false);
+
   // NW history
   const [nwHistory, setNwHistory] = useState<{ total: number; snapshot_date: string }[]>([]);
   const hasSnapshotted = useRef(false);
@@ -272,16 +379,35 @@ export default function FinancePage() {
   }, []);
 
   const fetchPlaid = useCallback(async (): Promise<PlaidConnection[]> => {
+    const cached = cacheGet<PlaidConnection[]>('plaid_accounts');
+    if (cached) setPlaidConns(cached);
     try {
       const res = await fetch('/api/plaid/accounts');
-      if (!res.ok) { setPlaidConns([]); return []; }
+      if (!res.ok) { if (!cached) setPlaidConns([]); return cached ?? []; }
       const d = await res.json() as PlaidConnection[];
       const conns = Array.isArray(d) ? d : [];
       setPlaidConns(conns);
+      cacheSet('plaid_accounts', conns, 5 * 60 * 1000);
       return conns;
     } catch {
-      setPlaidConns([]);
-      return [];
+      if (!cached) setPlaidConns([]);
+      return cached ?? [];
+    }
+  }, []);
+
+  const fetchTransactions = useCallback(async () => {
+    const cached = cacheGet<PlaidTx[]>('plaid_transactions');
+    if (cached) { setTransactions(cached); setTxLoading(false); }
+    else setTxLoading(true);
+    try {
+      const res = await fetch('/api/plaid/transactions?feed=true');
+      if (!res.ok) return;
+      const d = await res.json() as PlaidTx[];
+      const txns = Array.isArray(d) ? d : [];
+      setTransactions(txns);
+      cacheSet('plaid_transactions', txns, 30 * 60 * 1000);
+    } catch { /* ignore */ } finally {
+      setTxLoading(false);
     }
   }, []);
 
@@ -320,12 +446,9 @@ export default function FinancePage() {
 
   useEffect(() => {
     fetchItems();
-    fetchSubs();
-    fetchOrders();
-    fetchWishlist();
     fetchPlaid();
     fetchNWHistory();
-  }, [fetchItems, fetchSubs, fetchOrders, fetchWishlist, fetchPlaid, fetchNWHistory]);
+  }, [fetchItems, fetchPlaid, fetchNWHistory]);
 
   useEffect(() => {
     const stored = localStorage.getItem('finance_monthly_income');
@@ -513,15 +636,39 @@ export default function FinancePage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ item_id }),
     });
+    localStorage.removeItem('plaid_accounts');
+    localStorage.removeItem('plaid_transactions');
+    txFetched.current = false;
     fetchPlaid();
   }
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'networth', label: 'Net Worth' },
+    { id: 'transactions', label: 'Spending' },
     { id: 'subscriptions', label: 'Subscriptions' },
     { id: 'orders', label: 'Orders' },
     { id: 'wishlist', label: 'Wishlist' },
   ];
+
+  function handleTabChange(id: Tab) {
+    setTab(id);
+    if (id === 'transactions' && !txFetched.current && plaidConns.length > 0) {
+      txFetched.current = true;
+      fetchTransactions();
+    }
+    if (id === 'subscriptions' && !subsFetched.current) {
+      subsFetched.current = true;
+      fetchSubs();
+    }
+    if (id === 'orders' && !ordersFetched.current) {
+      ordersFetched.current = true;
+      fetchOrders();
+    }
+    if (id === 'wishlist' && !wishlistFetched.current) {
+      wishlistFetched.current = true;
+      fetchWishlist();
+    }
+  }
 
   return (
     <>
@@ -592,7 +739,7 @@ export default function FinancePage() {
 
       <div className="finance-tabs">
         {tabs.map(t => (
-          <button key={t.id} className={`finance-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+          <button key={t.id} className={`finance-tab${tab === t.id ? ' active' : ''}`} onClick={() => handleTabChange(t.id)}>
             {t.label}
           </button>
         ))}
@@ -775,7 +922,7 @@ export default function FinancePage() {
                                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--success)', opacity: 0.7, marginBottom: 6 }}>Assets</div>
                                   {depsAssets.map(acc => (
                                     <div key={acc.account_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
-                                      <span style={{ color: 'var(--text-secondary)' }}>{acc.name}</span>
+                                      <span style={{ color: 'var(--text-secondary)' }}>{acc.official_name ?? acc.name}{acc.mask ? ` ••••${acc.mask}` : ''}</span>
                                       <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{acc.balances.current !== null ? fmtDec(acc.balances.current) : '—'}</span>
                                     </div>
                                   ))}
@@ -786,7 +933,7 @@ export default function FinancePage() {
                                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--danger)', opacity: 0.7, margin: '10px 0 6px' }}>Liabilities</div>
                                   {connLiabilities.map(acc => (
                                     <div key={acc.account_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
-                                      <span style={{ color: 'var(--text-secondary)' }}>{acc.name}</span>
+                                      <span style={{ color: 'var(--text-secondary)' }}>{acc.official_name ?? acc.name}{acc.mask ? ` ••••${acc.mask}` : ''}</span>
                                       <span style={{ color: 'var(--danger)', fontWeight: 600 }}>−{acc.balances.current !== null ? fmtDec(acc.balances.current) : '—'}</span>
                                     </div>
                                   ))}
@@ -799,7 +946,7 @@ export default function FinancePage() {
                     }) : plaidAccounts.map(acc => (
                       <div key={acc.account_id}>
                         <div className="finance-row" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleAccount(acc.account_id)}>
-                          <span className="finance-row-name">{acc.name}</span>
+                          <span className="finance-row-name">{acc.official_name ?? acc.name}{acc.mask ? ` ••••${acc.mask}` : ''}</span>
                           <span style={{ fontSize: 10, color: 'var(--text-tertiary)', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 4 }}>auto</span>
                           <span className="finance-row-value">{acc.balances.current !== null ? fmt(acc.balances.current) : '—'}</span>
                           <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{expandedAccounts.has(acc.account_id) ? '▲' : '▼'}</span>
@@ -1099,6 +1246,146 @@ export default function FinancePage() {
           )}
         </div>
       )}
+
+      {/* ── Spending / Transactions Tab ── */}
+      {tab === 'transactions' && (() => {
+        if (!plaidConns.length) {
+          return <div className="empty-state">Connect a bank account to see your spending.</div>;
+        }
+        if (txLoading) return <div className="empty-state">Loading transactions…</div>;
+
+        // Compute category breakdown — infer from merchant name if Plaid returns null
+        const catTotals = new Map<string, number>();
+        for (const tx of transactions) {
+          const cat = txCat(tx);
+          catTotals.set(cat, (catTotals.get(cat) ?? 0) + tx.amount);
+        }
+        const topCats = [...catTotals.entries()].sort((a, b) => b[1] - a[1]);
+        const maxCatTotal = topCats[0]?.[1] ?? 1;
+        const totalSpent = transactions.reduce((s, t) => s + t.amount, 0);
+        // Assign stable colors to categories by their sorted rank
+        const catColorMap = new Map(topCats.map(([cat], i) => [cat, CAT_COLORS[i % CAT_COLORS.length]]));
+
+        // Build account lookup: account_id → { name, mask, institution, subtype }
+        const accountMap = new Map<string, { name: string; official_name: string | null; mask: string | null; institution: string | null; subtype: string }>();
+        for (const conn of plaidConns) {
+          for (const acc of conn.accounts) {
+            accountMap.set(acc.account_id, { name: acc.name, official_name: acc.official_name ?? null, mask: acc.mask ?? null, institution: conn.institution_name, subtype: acc.subtype });
+          }
+        }
+
+        // Filtered + grouped by date
+        const filtered = txFilter
+          ? transactions.filter(t => txCat(t) === txFilter)
+          : transactions;
+        const byDate = new Map<string, PlaidTx[]>();
+        for (const tx of filtered) {
+          if (!byDate.has(tx.date)) byDate.set(tx.date, []);
+          byDate.get(tx.date)!.push(tx);
+        }
+        const sortedDates = [...byDate.keys()].sort((a, b) => b.localeCompare(a));
+
+        return (
+          <>
+            {/* Summary */}
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 3 }}>SPENT — LAST 30 DAYS</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em' }}>${totalSpent.toFixed(0)}</div>
+                </div>
+                {txFilter && (
+                  <button onClick={() => setTxFilter(null)} style={{ fontSize: 11, color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                    Clear filter
+                  </button>
+                )}
+              </div>
+
+              {/* Category bars */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {topCats.map(([cat, total]) => {
+                  const color = catColorMap.get(cat) ?? CAT_COLORS[0];
+                  const emoji = getCatEmoji(cat);
+                  const isActive = txFilter === cat;
+                  return (
+                    <div key={cat} onClick={() => setTxFilter(isActive ? null : cat)} style={{ cursor: 'pointer', opacity: txFilter && !isActive ? 0.45 : 1, transition: 'opacity 0.15s' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: isActive ? color : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400 }}>
+                          {emoji} {cat}
+                        </span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>${total.toFixed(0)}</span>
+                      </div>
+                      <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2 }}>
+                        <div style={{ width: `${(total / maxCatTotal) * 100}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.3s' }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Transaction list */}
+            <div className="card">
+              {sortedDates.length === 0 && <div className="empty-state">No transactions to show.</div>}
+              {sortedDates.map(date => (
+                <div key={date}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', margin: '10px 0 6px', letterSpacing: '0.04em' }}>
+                    {fmtDate(date)}
+                  </div>
+                  {byDate.get(date)!.map(tx => {
+                    const cat = txCat(tx);
+                    const color = catColorMap.get(cat) ?? 'rgba(255,255,255,0.3)';
+                    const emoji = getCatEmoji(cat);
+                    const isOpen = expandedTx === tx.transaction_id;
+                    const acct = tx.account_id ? accountMap.get(tx.account_id) : undefined;
+                    return (
+                      <div key={tx.transaction_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <div
+                          onClick={() => setExpandedTx(isOpen ? null : tx.transaction_id)}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', cursor: 'pointer' }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {tx.name}
+                            </div>
+                            <div style={{ fontSize: 11, color, marginTop: 1 }}>
+                              {emoji} {cat}{tx.pending ? ' · Pending' : ''}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 12 }}>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'rgba(255,100,100,0.85)' }}>
+                              −${tx.amount.toFixed(2)}
+                            </div>
+                            <span style={{ fontSize: 9, color: 'var(--text-tertiary)', opacity: 0.6 }}>{isOpen ? '▲' : '▼'}</span>
+                          </div>
+                        </div>
+                        {isOpen && (
+                          <div style={{ padding: '8px 12px 10px', margin: '0 0 4px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 12 }}>
+                            {acct ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                                    {acct.institution ?? 'Bank'}{acct.mask ? ` ••••${acct.mask}` : ''}
+                                  </div>
+                                  <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 2, textTransform: 'capitalize' }}>
+                                    {acct.official_name ?? acct.name} · {acct.subtype.replace(/_/g, ' ')}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--text-tertiary)' }}>Account info unavailable</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </>
+        );
+      })()}
     </>
   );
 }

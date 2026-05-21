@@ -12,7 +12,16 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // OpenNext Cloudflare build output:
+    ".open-next/**",
   ]),
+  {
+    rules: {
+      // Downgrade to warning: rule produces false positives for async fetches
+      // (it can't statically detect that setState happens after an await, not synchronously)
+      "react-hooks/set-state-in-effect": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;

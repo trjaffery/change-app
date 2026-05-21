@@ -40,7 +40,6 @@ export default function WorkoutSession({
   const [freeEx, setFreeEx] = useState('');
   const [loading, setLoading] = useState(true);
   const [elapsed, setElapsed] = useState(0);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [restRemaining, setRestRemaining] = useState<number | null>(null);
   const [restingAt, setRestingAt] = useState<{ bi: number; ri: number } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -58,7 +57,6 @@ export default function WorkoutSession({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ split_day_id: splitDayId, date: today }),
     }).then(r => r.json()).then(data => {
-      setSessionId(data.id);
       sessionIdRef.current = data.id;
     });
   }, [splitDayId, today]);

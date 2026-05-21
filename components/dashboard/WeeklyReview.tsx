@@ -9,10 +9,12 @@ export default function WeeklyReview() {
 
   async function generate() {
     setLoading(true);
-    const res = await fetch('/api/ai/weekly-review', { method: 'POST' });
-    const json = await res.json();
-    setData(json);
-    setLoading(false);
+    try {
+      const res = await fetch('/api/ai/weekly-review', { method: 'POST' });
+      const json = await res.json();
+      setData(json);
+    } catch { /* leave data null so retry button stays visible */ }
+    finally { setLoading(false); }
   }
 
   return (

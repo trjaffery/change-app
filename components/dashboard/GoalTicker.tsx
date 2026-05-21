@@ -1,6 +1,5 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { getActiveDateString } from '@/lib/dates';
 
 interface Goal { id: string; text: string; done: boolean }
 interface TickerItem { status: 'done' | 'pending' | 'empty'; text: string }

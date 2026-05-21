@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase';
 
 function plaidBase() {
@@ -7,11 +7,13 @@ function plaidBase() {
 
 interface PlaidTransaction {
   transaction_id: string;
+  account_id: string;
   merchant_name: string | null;
   name: string;
   amount: number;
   date: string;
   category: string[] | null;
+  personal_finance_category: { primary: string; detailed: string; confidence_level: string } | null;
 }
 
 export interface SubscriptionCandidate {
@@ -83,22 +85,20 @@ function detectSubscriptions(transactions: PlaidTransaction[]): SubscriptionCand
   return candidates.sort((a, b) => b.occurrences - a.occurrences);
 }
 
-export async function GET() {
+async function fetchAllTransactions(dayWindow: number): Promise<PlaidTransaction[]> {
   const sb = supabaseServer();
   const { data: connections, error } = await sb.from('plaid_connections').select('*');
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!connections?.length) return NextResponse.json([]);
+  if (error || !connections?.length) return [];
 
   const end = new Date().toISOString().split('T')[0];
   const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 90);
+  startDate.setDate(startDate.getDate() - dayWindow);
   const start = startDate.toISOString().split('T')[0];
 
   const allTransactions: PlaidTransaction[] = [];
 
   for (const conn of connections) {
     let offset = 0;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const res = await fetch(`${plaidBase()}/transactions/get`, {
         method: 'POST',
@@ -109,16 +109,46 @@ export async function GET() {
           access_token: conn.access_token,
           start_date: start,
           end_date: end,
-          options: { count: 500, offset },
+          options: { count: 500, offset, include_personal_finance_category: true },
         }),
       });
-      const data = await res.json() as { transactions?: PlaidTransaction[]; total_transactions?: number; error_message?: string };
-      if (!res.ok || !data.transactions?.length) break;
+      if (!res.ok) break;
+      const data = await res.json() as { transactions?: PlaidTransaction[]; total_transactions?: number };
+      if (!data.transactions?.length) break;
       allTransactions.push(...data.transactions);
       offset += data.transactions.length;
       if (offset >= (data.total_transactions ?? 0) || offset >= 500) break;
     }
   }
 
-  return NextResponse.json(detectSubscriptions(allTransactions));
+  return allTransactions;
+}
+
+export async function GET(req: NextRequest) {
+  const feed = req.nextUrl.searchParams.get('feed') === 'true';
+
+  if (feed) {
+    const txns = await fetchAllTransactions(30);
+    const EXCLUDE_PFC = new Set(['TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS', 'BANK_FEES', 'INCOME']);
+    const EXCLUDE_CATS = new Set(['Transfer', 'Payment', 'Bank Fees', 'Interest', 'Cash Advance', 'Tax']);
+    const PAYMENT_NAME = /payment to .*(card|bank|chase|bofa|america|wells|citi|amex|discover|capital one|synchrony|barclays|apple card)|bank of america payment|online\/mobile|ach transfer|wire transfer|autopay|bill pay|payment thank you|credit card payment|epay|e-payment|card payment/i;
+    const result = txns
+      .filter(t => {
+        if (t.amount <= 0) return false;
+        const pfc = t.personal_finance_category?.primary;
+        if (pfc) return !EXCLUDE_PFC.has(pfc);
+        // Fallback for banks that don't return personal_finance_category
+        const nameCheck = t.merchant_name ?? t.name;
+        return (
+          !EXCLUDE_CATS.has(t.category?.[0] ?? '') &&
+          !PAYMENT_NAME.test(nameCheck) &&
+          !(t.amount > 200 && /\bpayment\b/i.test(nameCheck) && t.merchant_name == null)
+        );
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return NextResponse.json(result);
+  }
+
+  const txns = await fetchAllTransactions(90);
+  return NextResponse.json(detectSubscriptions(txns));
 }

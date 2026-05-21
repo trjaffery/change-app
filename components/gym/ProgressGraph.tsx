@@ -25,7 +25,9 @@ export default function ProgressGraph({ refreshKey }: { refreshKey: number }) {
     setPlateauTip(null);
     fetch(`/api/gym/history?exercise=${encodeURIComponent(selected)}`)
       .then(r => r.json())
-      .then(data => { setHistory(data); setLoading(false); });
+      .then(data => { setHistory(data); })
+      .catch(() => { setHistory([]); })
+      .finally(() => setLoading(false));
   }, [selected]);
 
   async function getPlateauTip() {

@@ -7,17 +7,22 @@ export default function CheckIn({ days }: { days: number }) {
 
   async function getCheckIn() {
     setLoading(true); setResponse('Getting your check-in…');
-    const urgesRes = await fetch('/api/recovery/urges');
-    const urges: { intensity: number; note: string }[] = await urgesRes.json();
-    const recentUrges = urges.slice(0, 5);
-    const res = await fetch('/api/ai/checkin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ days, recentUrges }),
-    });
-    const data = await res.json();
-    setResponse(data.message ?? (data.error === 'no_key' ? 'Add your Google API key to use AI check-ins.' : data.error ?? 'Something went wrong.'));
-    setLoading(false);
+    try {
+      const urgesRes = await fetch('/api/recovery/urges');
+      const urges: { intensity: number; note: string }[] = await urgesRes.json();
+      const recentUrges = urges.slice(0, 5);
+      const res = await fetch('/api/ai/checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days, recentUrges }),
+      });
+      const data = await res.json();
+      setResponse(data.message ?? (data.error === 'no_key' ? 'Add your Google API key to use AI check-ins.' : data.error ?? 'Something went wrong.'));
+    } catch {
+      setResponse('Network error — please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

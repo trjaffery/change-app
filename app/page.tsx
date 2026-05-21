@@ -17,7 +17,7 @@ export default function DashboardPage() {
       <h1 className="page-title">Change</h1>
       <DailyBriefing />
       <CompletionRing done={done} total={total} />
-      <HabitList onCompletionChange={(d, t) => { setDone(d); setTotal(t); }} />
+      <HabitList onCompletionChange={(d, t) => { setDone(d); setTotal(t); setCalKey(k => k + 1); }} />
       <HabitCalendar refreshKey={calKey} />
       <HabitCoach />
       <WeeklyReview />
