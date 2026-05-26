@@ -1,4 +1,6 @@
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+// Primary + fallback. Both must be current Google models — gemini-2.0-flash was
+// deprecated in early 2026, so 2.5-flash-lite is now the lightweight fallback.
+const MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 async function callModel(model: string, body: Record<string, unknown>): Promise<Response> {
   const key = process.env.GOOGLE_API_KEY!;
