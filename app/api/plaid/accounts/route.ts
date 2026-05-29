@@ -61,6 +61,24 @@ export async function DELETE(req: NextRequest) {
   const { item_id } = await req.json() as { item_id: string };
   if (!item_id) return NextResponse.json({ error: 'item_id required' }, { status: 400 });
   const sb = supabaseServer();
+
+  // Revoke the Item on Plaid's side before forgetting it locally. Best-effort:
+  // a Plaid failure shouldn't block local cleanup.
+  const { data: conn } = await sb.from('plaid_connections').select('access_token').eq('item_id', item_id).single();
+  if (conn?.access_token) {
+    try {
+      await fetch(`${plaidBase()}/item/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: process.env.PLAID_CLIENT_ID,
+          secret: process.env.PLAID_SECRET,
+          access_token: conn.access_token,
+        }),
+      });
+    } catch { /* ignore — proceed with local delete */ }
+  }
+
   const { error } = await sb.from('plaid_connections').delete().eq('item_id', item_id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

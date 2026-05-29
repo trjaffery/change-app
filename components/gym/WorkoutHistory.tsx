@@ -13,7 +13,7 @@ interface SetRow { id: string; exercise: string; reps: number; weight: number }
 const PAGE_SIZE = 10;
 
 function fmtDate(dateStr: string) {
-  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 export default function WorkoutHistory({ refreshKey }: { refreshKey: number }) {

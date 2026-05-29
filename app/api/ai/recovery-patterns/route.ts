@@ -9,6 +9,7 @@ interface PatternsResponse { riskFactors: string[]; timePatterns: string[]; copi
 export async function POST() {
   if (!process.env.GOOGLE_API_KEY) return NextResponse.json({ error: 'GOOGLE_API_KEY not set' }, { status: 500 });
 
+  try {
   const sb = supabaseServer();
   const [urgesRes, settingsRes] = await Promise.all([
     sb.from('recovery_urges').select('intensity, note, triggers, created_at').order('created_at', { ascending: true }),
@@ -84,4 +85,9 @@ Return JSON with this exact shape:
   const result = parseJSON<PatternsResponse>(raw);
 
   return NextResponse.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[recovery-patterns] error:', msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

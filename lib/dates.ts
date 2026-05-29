@@ -9,11 +9,20 @@ export function toDateString(d: Date): string {
 }
 
 export function getActiveDateString(): string {
-  return toDateString(new Date());
+  const now = new Date();
+  if (now.getHours() < 6) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    return toDateString(d);
+  }
+  return toDateString(now);
 }
 
 export function getTomorrowDateString(): string {
-  const d = new Date();
+  const now = new Date();
+  // Before 6 AM the active day is still "yesterday", so tomorrow is today's calendar date.
+  if (now.getHours() < 6) return toDateString(now);
+  const d = new Date(now);
   d.setDate(d.getDate() + 1);
   return toDateString(d);
 }
