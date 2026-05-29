@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase';
 import { callAI, parseJSON } from '@/lib/ai';
+import { computeCorrelations } from '@/lib/correlations';
 
 function toDateStr(d: Date) { return d.toISOString().split('T')[0]; }
 
@@ -11,6 +12,7 @@ export async function POST() {
 
   try {
   const sb = supabaseServer();
+  const correlationsPromise = computeCorrelations(sb);
   const today = toDateStr(new Date());
   const sevenAgo = toDateStr(new Date(Date.now() - 7 * 86400000));
 
@@ -102,20 +104,12 @@ export async function POST() {
     .sort((a, b) => b.gain - a.gain)
     .slice(0, 4);
 
-  // Gym ↔ urge correlation
-  const sessionDates = new Set(sessions.map(s => s.date));
-  const urgeDates = new Set(urges.map(u => u.created_at.split('T')[0]));
-  let sessionAndNoUrge = 0, noSessionAndUrge = 0;
-  for (let i = 0; i < 7; i++) {
-    const d = toDateStr(new Date(Date.now() - i * 86400000));
-    const hadSession = sessionDates.has(d);
-    const hadUrge = urgeDates.has(d);
-    if (hadSession && !hadUrge) sessionAndNoUrge++;
-    if (!hadSession && hadUrge) noSessionAndUrge++;
-  }
-  const correlationHint = (sessionAndNoUrge >= 2 && noSessionAndUrge >= 1)
-    ? `${sessionAndNoUrge} workout day(s) had no urges logged; ${noSessionAndUrge} non-workout day(s) had urges`
-    : null;
+  // Cross-domain patterns — precomputed over a 30-day window (own window, independent of the 7-day stats above)
+  const correlations = await correlationsPromise;
+  const patternBlock = correlations.length
+    ? '\nCROSS-DOMAIN PATTERNS (precomputed from the last 30 days — exact numbers, cite verbatim, do not invent others):\n'
+      + correlations.map(c => `- ${c.finding} [${c.strength}, ${c.samples.a} vs ${c.samples.b} days${c.confidence === 'low' ? ', rough estimate' : ''}]`).join('\n')
+    : '';
 
   const prompt = `Weekly review data (last 7 days):
 
@@ -140,12 +134,12 @@ ${relapses.length > 0 ? `- RELAPSES THIS WEEK: ${relapses.length} — ${relapseL
 FINANCE:
 - Net worth change this week: ${nwChange !== null ? `${nwChange >= 0 ? '+' : '−'}$${Math.abs(Math.round(nwChange)).toLocaleString()}` : 'no data'}
 - Monthly subscriptions: $${monthlyBurn.toFixed(0)}/mo
-${correlationHint ? `\nPATTERN DETECTED:\n- ${correlationHint}` : ''}
+${patternBlock}
 
 Return JSON with this exact shape:
 {"summary":"2-3 sentence overall summary of the week","wins":["2-3 specific wins based on their data"],"improvements":["2-3 specific areas to improve"],"plan":["3-4 concrete action items for next week based on the data"]}
 
-Look for cross-domain patterns — e.g. does working out correlate with fewer urges? Does missing habits affect gym consistency? Include any meaningful connection as a win or plan item.`;
+If CROSS-DOMAIN PATTERNS are listed above, reference the meaningful ones as a win or plan item — phrase them as observed associations (not proven cause) and use the exact numbers given. Do NOT invent any correlation that is not in that list.`;
 
   const raw = await callAI(prompt, 'You are a personal coach giving a weekly review. Be specific, reference their actual numbers, be honest but encouraging. If there were any relapses this week, address them first in the summary with compassion and grace — never gloss over them, but frame the rest of the week as resilience and a chance to learn. Respond with compact JSON only — no markdown. The user is Muslim. Where it feels genuine, reference Islamic values — gratitude (alhamdulillah), reflecting on blessings, sabr. Subtle and restrained.', 2000);
   const result = parseJSON<ReviewResponse>(raw);

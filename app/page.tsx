@@ -6,6 +6,7 @@ import HabitList from '@/components/habits/HabitList';
 import HabitCalendar from '@/components/habits/HabitCalendar';
 import HabitCoach from '@/components/habits/HabitCoach';
 import WeeklyReview from '@/components/dashboard/WeeklyReview';
+import Insights from '@/components/dashboard/Insights';
 
 export default function DashboardPage() {
   const [done, setDone] = useState(0);
@@ -21,6 +22,7 @@ export default function DashboardPage() {
       <HabitCalendar refreshKey={calKey} />
       <HabitCoach />
       <WeeklyReview />
+      <Insights />
     </>
   );
 }

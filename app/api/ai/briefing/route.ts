@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase';
 import { callAI } from '@/lib/ai';
+import { computeCorrelations } from '@/lib/correlations';
 
 function toDateStr(d: Date) {
   return d.toISOString().split('T')[0];
@@ -16,6 +17,8 @@ export async function POST() {
   const today = toDateStr(new Date());
   const yesterday = toDateStr(new Date(Date.now() - 86400000));
   const todayDow = new Date().getDay();
+
+  const correlationsPromise = computeCorrelations(sb);
 
   const sevenAgoIso = new Date(Date.now() - 7 * 86400000).toISOString();
   const [habitsRes, todayCompRes, yesterdayCompRes, splitsRes, settingsRes, urgesRes, goalsRes, relapsesRes] = await Promise.all([
@@ -79,6 +82,9 @@ export async function POST() {
     ? Math.floor((Date.now() - new Date(lastRelapse.created_at).getTime()) / 86400000)
     : null;
 
+  const correlations = await correlationsPromise;
+  const topCorrelation = correlations.find(c => c.confidence === 'high') ?? correlations[0];
+
   const context = [
     `Today: ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`,
     habits.length > 0 ? `Habits scheduled today: ${habitsDoneToday}/${habits.length} done so far; yesterday ${yesterdayDone}/${allHabits.length} completed` : 'No habits scheduled today',
@@ -87,11 +93,12 @@ export async function POST() {
     streakDays !== null ? `Recovery streak: ${streakDays} days` : 'No recovery streak set',
     lastRelapse ? `Relapse logged ${daysSinceRelapse === 0 ? 'today' : `${daysSinceRelapse} day${daysSinceRelapse === 1 ? '' : 's'} ago`}${lastRelapse.note ? ` — "${lastRelapse.note}"` : ''}` : '',
     urges.length > 0 ? `Recent urges: ${urges.length} logged, avg intensity ${(urges.reduce((s, u) => s + u.intensity, 0) / urges.length).toFixed(1)}/5. ${recentUrgeNote}` : 'No recent urges logged',
+    topCorrelation ? `Pattern in their last 30 days: ${topCorrelation.finding}` : '',
   ].filter(Boolean).join('\n');
 
   const briefing = await callAI(
     context,
-    'You are a personal coach writing a morning briefing for your client. Be warm, specific to their data, and motivating without being preachy. Write 3–4 sentences. Reference their actual numbers — pick one or two of: today\'s goals, scheduled habits, the workout/lifts, the streak, or relapse if applicable. End with one concrete intention for today. If a recent relapse is listed, gently acknowledge it and frame today as a fresh start without dwelling. The user is Muslim. Where it flows naturally, weave in a brief Islamic reference — alhamdulillah, in sha Allah, or sabr/istiqama. At most one reference, never forced.',
+    'You are a personal coach writing a morning briefing for your client. Be warm, specific to their data, and motivating without being preachy. Write 3–4 sentences. Reference their actual numbers — pick one or two of: today\'s goals, scheduled habits, the workout/lifts, the streak, or relapse if applicable. If a "Pattern in their last 30 days" line is provided, you may weave it in to make today\'s intention concrete (e.g. nudge toward a workout if it links to fewer urges) — state it as an observed association, never as proven cause, and only if it fits naturally. End with one concrete intention for today. If a recent relapse is listed, gently acknowledge it and frame today as a fresh start without dwelling. The user is Muslim. Where it flows naturally, weave in a brief Islamic reference — alhamdulillah, in sha Allah, or sabr/istiqama. At most one reference, never forced.',
     300,
   );
 
