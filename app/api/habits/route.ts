@@ -24,16 +24,31 @@ function isHabitDueToday(habit: Record<string, unknown>, date: string): boolean 
   }
 }
 
-function computeStreak(dates: string[], today: string): number {
-  if (!dates.length) return 0;
-  const s = new Set(dates);
-  let streak = 0;
+// Walks back day-by-day, skipping days the habit isn't scheduled on, and breaks
+// the first time a scheduled day's count fell short of goal_value. Only meaningful
+// for daily-period habits — weekly/monthly periods don't have a coherent day streak.
+function computeStreak(
+  habit: { schedule_type: string; schedule_days: number[] | null; goal_value: number; goal_period: string },
+  countByDate: Map<string, number>,
+  today: string,
+): number {
+  if (habit.goal_period !== 'day') return 0;
+
+  const met = (ds: string) => (countByDate.get(ds) ?? 0) >= habit.goal_value;
+  const due = (ds: string) => isHabitDueToday(habit as unknown as Record<string, unknown>, ds);
+
   const d = new Date(today + 'T12:00:00Z');
-  if (!s.has(today)) d.setUTCDate(d.getUTCDate() - 1);
-  while (true) {
+  // If today is a scheduled day and the goal isn't met yet, the streak is whatever
+  // it was up to yesterday — don't break on an in-progress day.
+  if (due(today) && !met(today)) d.setUTCDate(d.getUTCDate() - 1);
+
+  let streak = 0;
+  for (let i = 0; i < 400; i++) {
     const ds = d.toISOString().split('T')[0];
-    if (!s.has(ds)) break;
-    streak++;
+    if (due(ds)) {
+      if (!met(ds)) break;
+      streak++;
+    }
     d.setUTCDate(d.getUTCDate() - 1);
   }
   return streak;
@@ -66,14 +81,14 @@ export async function GET(req: NextRequest) {
 
   const { data: allCompletions } = await sb
     .from('habit_completions')
-    .select('habit_id, date')
+    .select('habit_id, date, count')
     .gte('date', sinceStr)
     .lte('date', date);
 
-  const completionsByHabit = new Map<string, string[]>();
+  const completionsByHabit = new Map<string, Map<string, number>>();
   for (const c of allCompletions ?? []) {
-    if (!completionsByHabit.has(c.habit_id)) completionsByHabit.set(c.habit_id, []);
-    completionsByHabit.get(c.habit_id)!.push(c.date);
+    if (!completionsByHabit.has(c.habit_id)) completionsByHabit.set(c.habit_id, new Map());
+    completionsByHabit.get(c.habit_id)!.set(c.date, c.count as number);
   }
 
   const result = habits
@@ -87,7 +102,16 @@ export async function GET(req: NextRequest) {
         ...h,
         period_done: periodDone,
         is_complete: periodDone >= (h.goal_value as number),
-        streak: computeStreak(completionsByHabit.get(h.id) ?? [], date),
+        streak: computeStreak(
+          {
+            schedule_type: h.schedule_type as string,
+            schedule_days: h.schedule_days as number[] | null,
+            goal_value: h.goal_value as number,
+            goal_period: h.goal_period as string,
+          },
+          completionsByHabit.get(h.id) ?? new Map(),
+          date,
+        ),
       };
     });
 
