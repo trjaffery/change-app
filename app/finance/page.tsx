@@ -188,45 +188,121 @@ function DonutChart({ data, netWorth }: { data: { label: string; value: number; 
 }
 
 function NWChart({ data }: { data: { total: number; snapshot_date: string }[] }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
   if (data.length < 2) return null;
-  const W = 600, H = 90, PX = 8, PT = 14, PB = 18;
+
+  const W = 600, H = 110, PX = 12, PT = 8, PB = 22;
   const innerW = W - PX * 2;
   const innerH = H - PT - PB;
-  const min = Math.min(...data.map(d => d.total));
-  const max = Math.max(...data.map(d => d.total));
+
+  // Pad y-range by ~5% so the line doesn't kiss the top/bottom edges.
+  const rawMin = Math.min(...data.map(d => d.total));
+  const rawMax = Math.max(...data.map(d => d.total));
+  const pad = (rawMax - rawMin) * 0.05 || Math.abs(rawMax) * 0.04 || 1;
+  const min = rawMin - pad;
+  const max = rawMax + pad;
   const range = max - min || 1;
+
   const pts = data.map((d, i) => ({
     x: PX + (i / (data.length - 1)) * innerW,
     y: PT + innerH - ((d.total - min) / range) * innerH,
-    ...d,
+    total: d.total,
+    date: d.snapshot_date,
   }));
   const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
   const rising = data[data.length - 1].total >= data[0].total;
   const color = rising ? '#6BE3A4' : '#FF6B6B';
   const last = pts[pts.length - 1];
-  const labelX = Math.min(last.x, W - 50);
+
+  // 4 sparse axis ticks: start, ~1/3, ~2/3, end (or all points if fewer than 4).
+  const tickIdx = data.length <= 4
+    ? data.map((_, i) => i)
+    : [0, Math.round((data.length - 1) / 3), Math.round((2 * (data.length - 1)) / 3), data.length - 1];
+  const fmtAxisDate = (s: string) =>
+    new Date(s + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  function onPointer(e: React.PointerEvent<SVGSVGElement>) {
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const svgX = ((e.clientX - rect.left) / rect.width) * W;
+    let nearest = 0, best = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const d = Math.abs(pts[i].x - svgX);
+      if (d < best) { best = d; nearest = i; }
+    }
+    setHoverIdx(nearest);
+  }
+
+  // Header shows hovered point if hovering, else the latest.
+  const displayIdx = hoverIdx ?? data.length - 1;
+  const display = data[displayIdx];
+  const displayDelta = displayIdx > 0 ? display.total - data[displayIdx - 1].total : 0;
+  const hover = hoverIdx !== null ? pts[hoverIdx] : null;
+
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', marginTop: 8 }}>
-      <defs>
-        <linearGradient id="nwg" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polygon points={`${PX},${PT + innerH} ${polyline} ${PX + innerW},${PT + innerH}`} fill="url(#nwg)" />
-      <polyline points={polyline} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={pts[0].x} cy={pts[0].y} r="2.5" fill={color} opacity="0.5" />
-      <circle cx={last.x} cy={last.y} r="3.5" fill={color} />
-      <text x={PX} y={H - 3} fill="#76746E" fontSize="9" fontFamily="-apple-system,sans-serif">
-        {new Date(data[0].snapshot_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-      </text>
-      <text x={W - PX} y={H - 3} fill="#76746E" fontSize="9" textAnchor="end" fontFamily="-apple-system,sans-serif">
-        {new Date(data[data.length - 1].snapshot_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-      </text>
-      <text x={labelX} y={last.y - 7} fill={color} fontSize="10" fontWeight="700" textAnchor="middle" fontFamily="-apple-system,sans-serif">
-        {last.total < 0 ? '−' : ''}{fmt(Math.abs(last.total))}
-      </text>
-    </svg>
+    <div>
+      {/* Header: value + day-over-day delta + date. Swaps to hovered point during scrub. */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6, paddingLeft: 4 }}>
+        <span style={{ fontSize: 22, fontWeight: 800, color: display.total < 0 ? '#FF6B6B' : 'var(--text-primary)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
+          {display.total < 0 ? '−' : ''}{fmt(Math.abs(display.total))}
+        </span>
+        {displayDelta !== 0 && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: displayDelta >= 0 ? 'var(--success)' : 'var(--danger)', fontVariantNumeric: 'tabular-nums' }}>
+            {displayDelta >= 0 ? '+' : '−'}{fmt(Math.abs(displayDelta))}
+          </span>
+        )}
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginLeft: 'auto', paddingRight: 4 }}>
+          {fmtAxisDate(display.snapshot_date)}
+        </span>
+      </div>
+
+      <svg
+        ref={svgRef}
+        width="100%"
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ display: 'block', touchAction: 'none', cursor: 'crosshair', maxHeight: 220, margin: '0 auto' }}
+        onPointerMove={onPointer}
+        onPointerDown={onPointer}
+        onPointerLeave={() => setHoverIdx(null)}
+      >
+        <defs>
+          <linearGradient id="nwg" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        <polygon points={`${PX},${PT + innerH} ${polyline} ${PX + innerW},${PT + innerH}`} fill="url(#nwg)" />
+        <polyline points={polyline} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <circle cx={pts[0].x} cy={pts[0].y} r="2.5" fill={color} opacity="0.5" />
+        <circle cx={last.x} cy={last.y} r="3.5" fill={color} />
+
+        {/* X-axis: 4 sparse date ticks */}
+        {tickIdx.map((i, k) => (
+          <text
+            key={i}
+            x={pts[i].x}
+            y={H - 6}
+            fill="#76746E"
+            fontSize="9"
+            textAnchor={k === 0 ? 'start' : k === tickIdx.length - 1 ? 'end' : 'middle'}
+            fontFamily="-apple-system,sans-serif"
+          >
+            {fmtAxisDate(data[i].snapshot_date)}
+          </text>
+        ))}
+
+        {/* Hover crosshair (header above shows the value/date) */}
+        {hover && (
+          <>
+            <line x1={hover.x} y1={PT} x2={hover.x} y2={PT + innerH} stroke="rgba(255,255,255,0.22)" strokeWidth="1" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+            <circle cx={hover.x} cy={hover.y} r="4" fill={color} stroke="rgba(0,0,0,0.55)" strokeWidth="1" />
+          </>
+        )}
+      </svg>
+    </div>
   );
 }
 
