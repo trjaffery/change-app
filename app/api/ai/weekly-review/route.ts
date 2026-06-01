@@ -42,12 +42,28 @@ export async function POST() {
     ? Math.floor((Date.now() - new Date(settings['sobriety_start']).getTime()) / 86400000)
     : null;
 
-  // Habit stats
-  const compByHabit: Record<string, number> = {};
-  for (const c of completions) compByHabit[c.habit_id] = (compByHabit[c.habit_id] ?? 0) + (c.count >= 1 ? 1 : 0);
+  // Habit stats — "hit" means the daily count met goal_value (daily-period habits) or the
+  // weekly count met goal_value (weekly-period habits). Matches habit-coach's definition so
+  // the two routes can't contradict each other on the same habit.
+  const dailyByHabit = new Map<string, Map<string, number>>();
+  for (const c of completions) {
+    const m = dailyByHabit.get(c.habit_id) ?? new Map<string, number>();
+    m.set(c.date, c.count);
+    dailyByHabit.set(c.habit_id, m);
+  }
   const habitSummary = habits.map(h => {
-    const daysHit = compByHabit[h.id] ?? 0;
-    return `${h.name}: ${daysHit}/7 days`;
+    const goal = h.goal_value as number;
+    const period = h.goal_period as string;
+    const counts = [...(dailyByHabit.get(h.id)?.values() ?? [])];
+    if (period === 'day') {
+      const daysHit = counts.filter(n => n >= goal).length;
+      return `${h.name}: hit goal ${daysHit}/7 days (goal ${goal}× per day)`;
+    }
+    const total = counts.reduce((s, n) => s + n, 0);
+    if (period === 'week') {
+      return `${h.name}: ${total}/${goal} this week — weekly goal ${total >= goal ? 'hit' : 'not hit'} (goal ${goal}× per week)`;
+    }
+    return `${h.name}: ${total} this week toward monthly goal of ${goal}× (partial window)`;
   });
 
   // Gym stats
@@ -111,14 +127,17 @@ export async function POST() {
       + correlations.map(c => `- ${c.finding} [${c.strength}, ${c.samples.a} vs ${c.samples.b} days${c.confidence === 'low' ? ', rough estimate' : ''}]`).join('\n')
     : '';
 
-  const prompt = `Weekly review data (last 7 days):
+  const goalsBlock = totalGoals === 0
+    ? '- No daily goals were set this week'
+    : `- Goals set on ${goalsSetDays}/7 days\n- ${goalsDone}/${totalGoals} completed${goalCompletionPct !== null ? ` (${goalCompletionPct}%)` : ''}`;
+
+  const prompt = `Weekly review data (last 7 days). Every number below is verified ground truth — cite exactly, never inflate, never state X/Y where X > Y, never invent stats not shown here.
 
 HABITS (${habits.length} total):
 ${habitSummary.length ? habitSummary.join('\n') : 'No habits tracked'}
 
 DAILY GOALS:
-- Goals set on ${goalsSetDays}/7 days
-- ${goalsDone}/${totalGoals} completed${goalCompletionPct !== null ? ` (${goalCompletionPct}%)` : ''}
+${goalsBlock}
 
 GYM:
 - Workouts completed: ${workoutCount}
@@ -141,7 +160,7 @@ Return JSON with this exact shape:
 
 If CROSS-DOMAIN PATTERNS are listed above, reference the meaningful ones as a win or plan item — phrase them as observed associations (not proven cause) and use the exact numbers given. Do NOT invent any correlation that is not in that list.`;
 
-  const raw = await callAI(prompt, 'You are a personal coach giving a weekly review. Be specific, reference their actual numbers, be honest but encouraging. If there were any relapses this week, address them first in the summary with compassion and grace — never gloss over them, but frame the rest of the week as resilience and a chance to learn. Respond with compact JSON only — no markdown. The user is Muslim. Where it feels genuine, reference Islamic values — gratitude (alhamdulillah), reflecting on blessings, sabr. Subtle and restrained.', 2000);
+  const raw = await callAI(prompt, 'You are a personal coach giving a weekly review. Hard rules: (1) Use ONLY numbers shown in the data block. Never state X/Y where X > Y. Never compute new ratios or invent figures. If a habit reads "hit goal 5/7 days", you cannot say "5 out of 8" or "6/7". (2) Every win, improvement, and plan item must reference a specific number from the data AND suggest a concrete action — not vague encouragement. (3) BANNED filler phrases (use specifics instead): "great foundation", "spiritual anchor", "commendable", "keep nurturing", "small consistent steps", "wonderful work", "amazing job", "renewed focus". (4) When goals were set on 0/7 days, don\'t say "0/0 completed needs attention" — say plainly they weren\'t set and suggest one starter goal. (5) If there were relapses this week, address them first in the summary with compassion and grace — never gloss over them, but frame the rest of the week as resilience and a chance to learn. Respond with compact JSON only — no markdown. The user is Muslim. Where it feels genuine, reference Islamic values once — gratitude (alhamdulillah), reflecting on blessings, sabr. Subtle and restrained, never preachy.', 2000);
   const result = parseJSON<ReviewResponse>(raw);
 
   return NextResponse.json(result);
