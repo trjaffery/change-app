@@ -1,5 +1,6 @@
 'use client';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * iOS-style bottom sheet:
@@ -26,6 +27,10 @@ export default function BottomSheet({
   title?: string;
   disableBackdropClose?: boolean;
 }) {
+  // Portal target — null on first render so SSR matches client.
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => { setPortalTarget(document.body); }, []);
+
   // Lock body scroll while the sheet is open.
   useEffect(() => {
     if (!open) return;
@@ -42,9 +47,12 @@ export default function BottomSheet({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !portalTarget) return null;
 
-  return (
+  // Render through a portal directly into <body> so the sheet escapes the
+  // parent <main>'s stacking context — otherwise the mobile bottom nav
+  // (z-index 100, sibling of <main>) covers the sheet's bottom edge.
+  return createPortal(
     <div
       className="bs-backdrop"
       onClick={() => !disableBackdropClose && onClose()}
@@ -120,6 +128,7 @@ export default function BottomSheet({
         {title && <div className="bs-title">{title}</div>}
         {children}
       </div>
-    </div>
+    </div>,
+    portalTarget,
   );
 }
