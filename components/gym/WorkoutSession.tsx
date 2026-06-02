@@ -1,6 +1,7 @@
 'use client';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { getActiveDateString } from '@/lib/dates';
+import BottomSheet from '@/components/layout/BottomSheet';
 
 interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string }
 interface GymSet { id: string; exercise: string; reps: number; weight: number }
@@ -47,6 +48,11 @@ export default function WorkoutSession({
   const sessionIdRef = useRef<string | null>(null);
   const sessionCreatedRef = useRef(false);
   const elapsedRef = useRef(0);
+  // Finish modal
+  const [showFinish, setShowFinish] = useState(false);
+  const [finishRpe, setFinishRpe] = useState<number | null>(null);
+  const [finishNotes, setFinishNotes] = useState('');
+  const [finishing, setFinishing] = useState(false);
 
   // Create session record once — guard prevents StrictMode double-fire
   useEffect(() => {
@@ -151,15 +157,20 @@ export default function WorkoutSession({
     setRestingAt(null);
   }
 
-  async function endWorkout() {
+  async function endWorkout(rpe: number | null, notes: string) {
+    setFinishing(true);
     if (timerRef.current) clearInterval(timerRef.current);
     if (restTimerRef.current) clearInterval(restTimerRef.current);
     const sid = sessionIdRef.current;
     if (sid) {
+      const body: Record<string, unknown> = { ended_at: new Date().toISOString(), duration_seconds: elapsedRef.current };
+      if (rpe !== null) body.rpe = rpe;
+      const trimmed = notes.trim();
+      if (trimmed) body.notes = trimmed;
       await fetch(`/api/gym/sessions/${sid}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ended_at: new Date().toISOString(), duration_seconds: elapsedRef.current }),
+        body: JSON.stringify(body),
       });
     }
     onFinish();
@@ -252,11 +263,62 @@ export default function WorkoutSession({
         <button
           className="btn-danger"
           style={{ padding: '10px 18px', fontSize: 13 }}
-          onClick={endWorkout}
+          onClick={() => setShowFinish(true)}
         >
           End
         </button>
       </div>
+
+      <BottomSheet
+        open={showFinish}
+        onClose={() => !finishing && setShowFinish(false)}
+        title="How did it feel?"
+        disableBackdropClose={finishing}
+      >
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 16 }}>
+          RPE and notes are optional — skip if you don&apos;t track them.
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 8, fontFamily: 'var(--font-mono)' }}>RPE</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+          {Array.from({ length: 10 }, (_, i) => i + 1).map(n => {
+            const isSel = finishRpe === n;
+            const tone = n <= 4 ? '#6BE3A4' : n <= 7 ? '#F2C063' : '#FF6B6B';
+            return (
+              <button
+                key={n}
+                onClick={() => setFinishRpe(isSel ? null : n)}
+                style={{
+                  flex: '1 1 0', minWidth: 32, height: 40, borderRadius: 10,
+                  background: isSel ? `${tone}26` : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${isSel ? `${tone}88` : 'rgba(255,255,255,0.08)'}`,
+                  color: isSel ? tone : 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                {n}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 8, fontFamily: 'var(--font-mono)' }}>Notes</div>
+        <textarea
+          value={finishNotes}
+          onChange={e => setFinishNotes(e.target.value)}
+          placeholder="Energy, form, pain, anything to remember…"
+          rows={3}
+          style={{ width: '100%', resize: 'vertical', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '12px 14px', color: 'var(--text-primary)', fontSize: 16, fontFamily: 'var(--font-sans)', outline: 'none', marginBottom: 18 }}
+        />
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn-secondary" style={{ fontSize: 13 }} disabled={finishing} onClick={() => endWorkout(null, '')}>Skip & end</button>
+          <button className="btn-primary" style={{ fontSize: 13 }} disabled={finishing} onClick={() => endWorkout(finishRpe, finishNotes)}>
+            {finishing ? 'Saving…' : 'Save & finish'}
+          </button>
+        </div>
+      </BottomSheet>
 
       {/* Exercise blocks */}
       {blocks.map((block, bi) => (

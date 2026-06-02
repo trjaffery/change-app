@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import DailyBriefing from '@/components/dashboard/DailyBriefing';
 import CompletionRing from '@/components/dashboard/CompletionRing';
+import GoalTicker from '@/components/dashboard/GoalTicker';
+import DailyGoals from '@/components/dashboard/DailyGoals';
 import HabitList from '@/components/habits/HabitList';
 import HabitCalendar from '@/components/habits/HabitCalendar';
 import HabitCoach from '@/components/habits/HabitCoach';
@@ -17,7 +19,9 @@ export default function DashboardPage() {
     <>
       <h1 className="page-title">Change</h1>
       <DailyBriefing />
+      <GoalTicker />
       <CompletionRing done={done} total={total} />
+      <DailyGoals />
       <HabitList onCompletionChange={(d, t) => { setDone(d); setTotal(t); setCalKey(k => k + 1); }} />
       <HabitCalendar refreshKey={calKey} />
       <HabitCoach />

@@ -46,7 +46,21 @@ export default function Insights() {
       </div>
 
       {loading ? (
-        <p style={{ fontSize: 13, color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic' }}>Looking for patterns…</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <style>{`
+            .ins-sk { background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 100%); background-size: 200% 100%; animation: ins-shimmer 1.6s linear infinite; border-radius: 6px; }
+            @keyframes ins-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+          `}</style>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span className="ins-sk" style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 4, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <span className="ins-sk" style={{ display: 'block', width: `${80 - i * 12}%`, height: 12, marginBottom: 6 }} />
+                <span className="ins-sk" style={{ display: 'block', width: '40%', height: 8 }} />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : errorMsg ? (
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic', wordBreak: 'break-word' }}>Error: {errorMsg}</p>
       ) : !correlations || correlations.length === 0 ? (

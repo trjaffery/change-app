@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
+import EmptyState from '@/components/layout/EmptyState';
 
 function cacheSet(key: string, data: unknown, ttlMs: number) {
   try {
@@ -84,7 +85,34 @@ function inferCategory(name: string, merchant: string | null): string {
 // PFC categories that are too broad to trust alone — refine with regex
 const VAGUE_PFC = new Set(['GENERAL_MERCHANDISE', 'GENERAL_SERVICES']);
 
+// Merchant overrides — these WIN over Plaid's personal_finance_category, because Plaid
+// routinely mis-classifies merchants where the brand and the actual purchase diverge
+// (e.g. Buc-ee's tagged as merchandise, HEB gas tagged as food because HEB is a grocer).
+// Both `name` and `merchant_name` are concatenated so qualifiers like "GAS/CARWASH" in
+// the longer `name` field aren't missed when `merchant_name` is just the bare brand.
+// Add new patterns here as they crop up.
+function merchantOverride(name: string, merchant: string | null): string | null {
+  const s = `${name} ${merchant ?? ''}`.toLowerCase();
+  // Travel plaza chain — always Transport
+  if (/buc-?ee/.test(s)) return 'Transport';
+  // Grocer-branded fuel stations: parent brand + a fuel keyword anywhere in the string
+  const isFuelPurchase = /\b(gas|fuel|gasoline|fuelcenter|fuel center|carwash|car wash)\b/.test(s);
+  if (isFuelPurchase) {
+    if (/\bh-?e-?b\b/.test(s)) return 'Transport';
+    if (/\bcostco\b/.test(s)) return 'Transport';
+    if (/\bsam'?s\s*club\b/.test(s)) return 'Transport';
+    if (/\bkroger\b/.test(s)) return 'Transport';
+    if (/\bwalmart\b/.test(s)) return 'Transport';
+  }
+  // Pure travel-plaza / convenience-store gas brands
+  if (/\b(wawa|sheetz|quiktrip|quick trip|loves travel|love's travel|pilot travel|flying j|ta travel|wally's|royal farms)\b/.test(s)) return 'Transport';
+  return null;
+}
+
 function txCat(tx: { name: string; merchant_name: string | null; category: string[] | null; personal_finance_category?: { primary: string } | null }): string {
+  // Merchant overrides take precedence over everything else.
+  const override = merchantOverride(tx.name, tx.merchant_name);
+  if (override) return override;
   const pfc = tx.personal_finance_category?.primary;
   // Specific PFC categories — trust them completely
   if (pfc && !VAGUE_PFC.has(pfc)) return PFC_MAP[pfc] ?? 'Other';
@@ -149,7 +177,11 @@ function daysUntil(d: string | null) {
   return Math.ceil((new Date(d + 'T12:00:00').getTime() - new Date().setHours(12, 0, 0, 0)) / 86400000);
 }
 
-function DonutChart({ data, netWorth }: { data: { label: string; value: number; color: string }[]; netWorth: number }) {
+function withinDays(dateStr: string, days: number): boolean {
+  return Date.now() - new Date(dateStr + 'T12:00:00').getTime() <= days * 86400000;
+}
+
+function DonutChart({ data, netWorth, centerLabel = 'net worth' }: { data: { label: string; value: number; color: string }[]; netWorth: number; centerLabel?: string }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (total <= 0) return null;
   const r = 58;
@@ -181,7 +213,7 @@ function DonutChart({ data, netWorth }: { data: { label: string; value: number; 
         {netWorth < 0 ? '−' : ''}{fmt(Math.abs(netWorth))}
       </text>
       <text x={cx} y={cy + 12} textAnchor="middle" fill="#76746E" fontSize="10" fontFamily="-apple-system,sans-serif">
-        net worth
+        {centerLabel}
       </text>
     </svg>
   );
@@ -269,15 +301,29 @@ function NWChart({ data }: { data: { total: number; snapshot_date: string }[] })
       >
         <defs>
           <linearGradient id="nwg" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+            <stop offset="0%" stopColor={color} stopOpacity="0.22" />
             <stop offset="100%" stopColor={color} stopOpacity="0" />
           </linearGradient>
+          <filter id="nw-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.4" result="b" />
+            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
         </defs>
 
         <polygon points={`${PX},${PT + innerH} ${polyline} ${PX + innerW},${PT + innerH}`} fill="url(#nwg)" />
-        <polyline points={polyline} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+
+        {/* dashed mean line for context */}
+        {data.length >= 4 && (() => {
+          const meanTotal = data.reduce((s, d) => s + d.total, 0) / data.length;
+          const meanY = PT + innerH - ((meanTotal - min) / range) * innerH;
+          return (
+            <line x1={PX} y1={meanY} x2={PX + innerW} y2={meanY} stroke={color} strokeOpacity="0.32" strokeWidth="1.1" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+          );
+        })()}
+
+        <polyline points={polyline} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" filter="url(#nw-glow)" vectorEffect="non-scaling-stroke" />
         <circle cx={pts[0].x} cy={pts[0].y} r="2.5" fill={color} opacity="0.5" />
-        <circle cx={last.x} cy={last.y} r="3.5" fill={color} />
+        <circle cx={last.x} cy={last.y} r="4" fill="#FFFFFF" stroke={color} strokeWidth="2" filter="url(#nw-glow)" />
 
         {/* X-axis: 4 sparse date ticks */}
         {tickIdx.map((i, k) => (
@@ -333,6 +379,7 @@ function PlaidLinkButton({ onSuccess }: { onSuccess: () => void }) {
       setLinkToken(null);
       localStorage.removeItem('plaid_accounts');
       localStorage.removeItem('plaid_transactions');
+      localStorage.removeItem('plaid_transactions_1y');
       onSuccess();
     },
     onExit: () => setLinkToken(null),
@@ -412,6 +459,7 @@ export default function FinancePage() {
   const [transactions, setTransactions] = useState<PlaidTx[]>([]);
   const [txLoading, setTxLoading] = useState(false);
   const [txFilter, setTxFilter] = useState<string | null>(null);
+  const [txRange, setTxRange] = useState<7 | 30 | 90 | 365>(30);
   const [expandedTx, setExpandedTx] = useState<string | null>(null);
   const txFetched = useRef(false);
   const subsFetched = useRef(false);
@@ -472,16 +520,17 @@ export default function FinancePage() {
   }, []);
 
   const fetchTransactions = useCallback(async () => {
-    const cached = cacheGet<PlaidTx[]>('plaid_transactions');
+    // Fetch the full 1y window once; client-side range picker slices into 7/30/90/365.
+    const cached = cacheGet<PlaidTx[]>('plaid_transactions_1y');
     if (cached) { setTransactions(cached); setTxLoading(false); }
     else setTxLoading(true);
     try {
-      const res = await fetch('/api/plaid/transactions?feed=true');
+      const res = await fetch('/api/plaid/transactions?feed=true&days=365');
       if (!res.ok) return;
       const d = await res.json() as PlaidTx[];
       const txns = Array.isArray(d) ? d : [];
       setTransactions(txns);
-      cacheSet('plaid_transactions', txns, 30 * 60 * 1000);
+      cacheSet('plaid_transactions_1y', txns, 30 * 60 * 1000);
     } catch { /* ignore */ } finally {
       setTxLoading(false);
     }
@@ -903,6 +952,19 @@ export default function FinancePage() {
                     <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
                       <div style={{ width: `${Math.min(savingsRate, 100)}%`, height: '100%', background: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 10 ? '#F2C063' : 'var(--danger)', borderRadius: 4, transition: 'width 0.4s ease' }} />
                     </div>
+                    {(() => {
+                      const monthlyNet = monthlyIncome - monthlyBurn;
+                      const yearProj = monthlyNet * 12;
+                      const tone = monthlyNet >= 0 ? 'var(--success)' : 'var(--danger)';
+                      return (
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>12-month projection</div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700, color: tone, letterSpacing: '-0.01em' }}>
+                            {monthlyNet >= 0 ? '+' : '−'}{fmt(Math.abs(yearProj))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6 }}>Based on tracked subscriptions · savings from other spending not included</div>
                   </div>
                 ) : (
@@ -1135,7 +1197,12 @@ export default function FinancePage() {
           ) : (
             <>
               {subs.length === 0 && !addingSub && !candidates && (
-                <div className="empty-state">No subscriptions yet</div>
+                <EmptyState
+                  glyph="◌"
+                  title="No subscriptions tracked"
+                  description="Add what you pay for monthly so the savings rate stays honest. Or scan Plaid for recurring charges."
+                  action={{ label: '+ Add manually', onClick: () => setAddingSub(true) }}
+                />
               )}
               {sortedSubs.map(sub => {
                 const days = daysUntil(sub.next_renewal);
@@ -1240,13 +1307,21 @@ export default function FinancePage() {
           ) : (
             <>
               {orders.length === 0 && !addingOrder && (
-                <div className="empty-state">No incoming orders</div>
+                <EmptyState
+                  glyph="◇"
+                  title="Nothing on the way"
+                  description="Add things you've ordered to see what's coming and how much of your net worth is mid-flight."
+                  action={{ label: '+ Add order', onClick: () => setAddingOrder(true) }}
+                />
               )}
               {orders.map(order => (
                 <div key={order.id} className="finance-row">
                   <span className="finance-row-name">{order.name}</span>
                   {order.store && <span className="finance-row-meta">from {order.store}</span>}
                   {order.eta && <span className="finance-row-meta">ETA {fmtDate(order.eta)}</span>}
+                  {totalNetWorth > 0 && (
+                    <span className="pct-badge">{(order.amount / totalNetWorth * 100).toFixed(1)}%</span>
+                  )}
                   <span className="finance-row-value">{fmt(order.amount)}</span>
                   <button className="icon-btn danger" onClick={() => deleteOrder(order.id)} title="Delete">✕</button>
                 </div>
@@ -1290,7 +1365,12 @@ export default function FinancePage() {
           ) : (
             <>
               {wishlist.length === 0 && !addingWish && (
-                <div className="empty-state">Nothing on your wishlist yet</div>
+                <EmptyState
+                  glyph="✦"
+                  title="No wishlist items"
+                  description="Drop things you want here. Seeing the % of net worth they'd cost is a good antidote to impulse."
+                  action={{ label: '+ Add to wishlist', onClick: () => setAddingWish(true) }}
+                />
               )}
               {wishlist.map(item => (
                 <div key={item.id} className="finance-row">
@@ -1330,17 +1410,21 @@ export default function FinancePage() {
         }
         if (txLoading) return <div className="empty-state">Loading transactions…</div>;
 
+        // Time-range filter — apply before any aggregation so donut, bars, list, and total all agree.
+        const inRange = transactions.filter(t => withinDays(t.date, txRange));
+
         // Compute category breakdown — infer from merchant name if Plaid returns null
         const catTotals = new Map<string, number>();
-        for (const tx of transactions) {
+        for (const tx of inRange) {
           const cat = txCat(tx);
           catTotals.set(cat, (catTotals.get(cat) ?? 0) + tx.amount);
         }
         const topCats = [...catTotals.entries()].sort((a, b) => b[1] - a[1]);
         const maxCatTotal = topCats[0]?.[1] ?? 1;
-        const totalSpent = transactions.reduce((s, t) => s + t.amount, 0);
+        const totalSpent = inRange.reduce((s, t) => s + t.amount, 0);
         // Assign stable colors to categories by their sorted rank
         const catColorMap = new Map(topCats.map(([cat], i) => [cat, CAT_COLORS[i % CAT_COLORS.length]]));
+        const donutData = topCats.map(([cat, total]) => ({ label: cat, value: total, color: catColorMap.get(cat) ?? CAT_COLORS[0] }));
 
         // Build account lookup: account_id → { name, mask, institution, subtype }
         const accountMap = new Map<string, { name: string; official_name: string | null; mask: string | null; institution: string | null; subtype: string }>();
@@ -1352,8 +1436,8 @@ export default function FinancePage() {
 
         // Filtered + grouped by date
         const filtered = txFilter
-          ? transactions.filter(t => txCat(t) === txFilter)
-          : transactions;
+          ? inRange.filter(t => txCat(t) === txFilter)
+          : inRange;
         const byDate = new Map<string, PlaidTx[]>();
         for (const tx of filtered) {
           if (!byDate.has(tx.date)) byDate.set(tx.date, []);
@@ -1361,13 +1445,32 @@ export default function FinancePage() {
         }
         const sortedDates = [...byDate.keys()].sort((a, b) => b.localeCompare(a));
 
+        const RANGES: { value: 7 | 30 | 90 | 365; label: string }[] = [
+          { value: 7, label: '7d' }, { value: 30, label: '30d' }, { value: 90, label: '90d' }, { value: 365, label: '1y' },
+        ];
+
         return (
           <>
             {/* Summary */}
             <div className="card" style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+              {/* Range picker */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                <div className="cost-toggle">
+                  {RANGES.map(r => (
+                    <button
+                      key={r.value}
+                      className={`cost-toggle-btn${txRange === r.value ? ' active' : ''}`}
+                      onClick={() => setTxRange(r.value)}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 3 }}>SPENT — LAST 30 DAYS</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 3 }}>SPENT — LAST {txRange === 365 ? '365 DAYS' : `${txRange} DAYS`}</div>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em' }}>${totalSpent.toFixed(0)}</div>
                 </div>
                 {txFilter && (
@@ -1377,26 +1480,34 @@ export default function FinancePage() {
                 )}
               </div>
 
-              {/* Category bars */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {topCats.map(([cat, total]) => {
-                  const color = catColorMap.get(cat) ?? CAT_COLORS[0];
-                  const emoji = getCatEmoji(cat);
-                  const isActive = txFilter === cat;
-                  return (
-                    <div key={cat} onClick={() => setTxFilter(isActive ? null : cat)} style={{ cursor: 'pointer', opacity: txFilter && !isActive ? 0.45 : 1, transition: 'opacity 0.15s' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, color: isActive ? color : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400 }}>
-                          {emoji} {cat}
-                        </span>
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>${total.toFixed(0)}</span>
+              {/* Donut + category bars side by side */}
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                {donutData.length > 0 && (
+                  <DonutChart data={donutData} netWorth={totalSpent} centerLabel="spent" />
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 200 }}>
+                  {topCats.length === 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>No transactions in this range.</div>
+                  )}
+                  {topCats.map(([cat, total]) => {
+                    const color = catColorMap.get(cat) ?? CAT_COLORS[0];
+                    const emoji = getCatEmoji(cat);
+                    const isActive = txFilter === cat;
+                    return (
+                      <div key={cat} onClick={() => setTxFilter(isActive ? null : cat)} style={{ cursor: 'pointer', opacity: txFilter && !isActive ? 0.45 : 1, transition: 'opacity 0.15s' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, color: isActive ? color : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400 }}>
+                            {emoji} {cat}
+                          </span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>${total.toFixed(0)}</span>
+                        </div>
+                        <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2 }}>
+                          <div style={{ width: `${(total / maxCatTotal) * 100}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.3s' }} />
+                        </div>
                       </div>
-                      <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2 }}>
-                        <div style={{ width: `${(total / maxCatTotal) * 100}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.3s' }} />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
 

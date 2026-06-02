@@ -12,14 +12,14 @@ export default function RecoveryPage() {
   const [urgeRefreshKey, setUrgeRefreshKey] = useState(0);
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 16px 40px' }}>
-      <div className="page-title">Recovery</div>
+    <>
+      <h1 className="page-title">Recovery</h1>
       <StreakCard onStreakChange={setDays} />
       <CheckIn days={days} />
       <UrgeLog onUrgeLogged={() => setUrgeRefreshKey(k => k + 1)} />
       <UrgePatterns refreshKey={urgeRefreshKey} />
       <CopingStrategies />
       <RelapseLog onRelapse={() => setDays(0)} />
-    </div>
+    </>
   );
 }

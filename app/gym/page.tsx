@@ -5,6 +5,8 @@ import DaySelector from '@/components/gym/DaySelector';
 import WorkoutSession from '@/components/gym/WorkoutSession';
 import ProgressGraph from '@/components/gym/ProgressGraph';
 import WorkoutHistory from '@/components/gym/WorkoutHistory';
+import ExerciseSparklineGrid from '@/components/gym/ExerciseSparklineGrid';
+import WorkoutAdherenceCard from '@/components/gym/WorkoutAdherenceCard';
 
 const REST_PRESETS = [60, 90, 120, 180];
 
@@ -103,7 +105,9 @@ export default function GymPage() {
           >
             Start Workout
           </button>
+          <WorkoutAdherenceCard refreshKey={graphKey} />
           <WorkoutHistory refreshKey={graphKey} />
+          <ExerciseSparklineGrid refreshKey={graphKey} />
           <ProgressGraph refreshKey={graphKey} />
         </>
       )}

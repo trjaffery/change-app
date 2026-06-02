@@ -117,7 +117,7 @@ async function fetchAllTransactions(dayWindow: number): Promise<PlaidTransaction
       if (!data.transactions?.length) break;
       allTransactions.push(...data.transactions);
       offset += data.transactions.length;
-      if (offset >= (data.total_transactions ?? 0) || offset >= 500) break;
+      if (offset >= (data.total_transactions ?? 0) || offset >= 2000) break;
     }
   }
 
@@ -126,9 +126,11 @@ async function fetchAllTransactions(dayWindow: number): Promise<PlaidTransaction
 
 export async function GET(req: NextRequest) {
   const feed = req.nextUrl.searchParams.get('feed') === 'true';
+  const daysParam = Number(req.nextUrl.searchParams.get('days'));
+  const days = Number.isFinite(daysParam) && daysParam > 0 ? Math.min(daysParam, 365) : 30;
 
   if (feed) {
-    const txns = await fetchAllTransactions(30);
+    const txns = await fetchAllTransactions(days);
     const EXCLUDE_PFC = new Set(['TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS', 'BANK_FEES', 'INCOME']);
     const EXCLUDE_CATS = new Set(['Transfer', 'Payment', 'Bank Fees', 'Interest', 'Cash Advance', 'Tax']);
     const PAYMENT_NAME = /payment to .*(card|bank|chase|bofa|america|wells|citi|amex|discover|capital one|synchrony|barclays|apple card)|bank of america payment|online\/mobile|ach transfer|wire transfer|autopay|bill pay|payment thank you|credit card payment|epay|e-payment|card payment/i;

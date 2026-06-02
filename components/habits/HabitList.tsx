@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getActiveDateString, toDateString, formatDate } from '@/lib/dates';
+import BottomSheet from '@/components/layout/BottomSheet';
 
 interface Habit {
   id: string;
@@ -32,6 +33,7 @@ function periodLabel(habit: Habit): string {
 export default function HabitList({ onCompletionChange }: { onCompletionChange?: (done: number, total: number) => void }) {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [adding, setAdding] = useState(false);
+  const [addStep, setAddStep] = useState(0); // 0 = name+color, 1 = schedule, 2 = goal
   const today = getActiveDateString();
   const [selectedDate, setSelectedDate] = useState(today);
 
@@ -72,15 +74,15 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   useEffect(() => { fetchHabits(); }, [fetchHabits]);
 
   function optimisticUpdate(habitId: string, delta: 1 | -1) {
-    setHabits(prev => {
-      const next = prev.map(h => {
-        if (h.id !== habitId) return h;
-        const newDone = Math.max(0, h.period_done + delta);
-        return { ...h, period_done: newDone, is_complete: newDone >= h.goal_value };
-      });
-      if (isToday) onCompletionChangeRef.current?.(next.filter(h => h.is_complete).length, next.length);
-      return next;
+    // Compute `next` outside the updater so we can also notify the parent without
+    // running setState-from-render-of-another-component (React 19 flags that).
+    const next = habits.map(h => {
+      if (h.id !== habitId) return h;
+      const newDone = Math.max(0, h.period_done + delta);
+      return { ...h, period_done: newDone, is_complete: newDone >= h.goal_value };
     });
+    setHabits(next);
+    if (isToday) onCompletionChangeRef.current?.(next.filter(h => h.is_complete).length, next.length);
   }
 
   async function increment(habit: Habit) {
@@ -132,8 +134,18 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
     setScheduleCount(3);
     setGoalPeriod('day');
     setGoalValue(1);
+    setAddStep(0);
     setAdding(false);
     fetchHabits();
+  }
+
+  function openAdd() {
+    setAddStep(0);
+    setAdding(true);
+  }
+  function closeAdd() {
+    setAdding(false);
+    // Don't reset the in-progress fields; user might re-open and continue.
   }
 
   function toggleScheduleDay(d: number) {
@@ -186,51 +198,74 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
               </span>
             )}
             {isToday && (
-              <button className="btn-secondary" style={{ padding: '6px 14px', fontSize: 12 }} onClick={() => setAdding(a => !a)}>
-                {adding ? 'Cancel' : '+ Add habit'}
+              <button className="btn-secondary" style={{ padding: '6px 14px', fontSize: 12 }} onClick={openAdd}>
+                + Add habit
               </button>
             )}
           </div>
         </div>
 
-        {adding && (
-          <div style={{ marginBottom: 16, padding: '16px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Name + Color */}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                className="text-input"
-                type="text"
-                placeholder="Habit name…"
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addHabit()}
-                autoFocus
-                style={{ flex: 1 }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {PRESET_COLORS.map(c => (
-                <button key={c} className={`color-swatch${newColor === c ? ' selected' : ''}`} onClick={() => setNewColor(c)} style={{ background: c }} />
-              ))}
-            </div>
+        <BottomSheet open={adding} onClose={closeAdd} title="New habit">
+          {/* Progress dots */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginBottom: 18 }}>
+            {[0, 1, 2].map(i => (
+              <span key={i} style={{
+                width: i === addStep ? 22 : 6,
+                height: 6,
+                borderRadius: 3,
+                background: i <= addStep ? newColor : 'rgba(255,255,255,0.12)',
+                transition: 'width 220ms ease, background 220ms ease',
+              }} />
+            ))}
+          </div>
 
-            {/* Schedule */}
-            <div>
-              <div className="form-label">Schedule</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {(['daily', 'specific_days_week', 'days_per_week', 'specific_days_month', 'days_per_month'] as const).map(type => (
-                  <button key={type} className={`seg-btn${scheduleType === type ? ' active' : ''}`} onClick={() => setScheduleType(type)}>
-                    {type === 'daily' ? 'Every day'
-                      : type === 'specific_days_week' ? 'Specific days'
-                      : type === 'days_per_week' ? 'X days/week'
-                      : type === 'specific_days_month' ? 'Specific dates'
-                      : 'X days/month'}
-                  </button>
-                ))}
+          {/* Step 0: Name + color */}
+          {addStep === 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <div className="form-label" style={{ marginBottom: 8 }}>Name</div>
+                <input
+                  className="text-input"
+                  type="text"
+                  placeholder="e.g. Salah, Read, Walk"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && newName.trim()) setAddStep(1); }}
+                  autoFocus
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div>
+                <div className="form-label" style={{ marginBottom: 8 }}>Accent color</div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {PRESET_COLORS.map(c => (
+                    <button key={c} className={`color-swatch${newColor === c ? ' selected' : ''}`} onClick={() => setNewColor(c)} style={{ background: c, width: 32, height: 32 }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 1: Schedule */}
+          {addStep === 1 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div className="form-label" style={{ marginBottom: 8 }}>How often</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(['daily', 'specific_days_week', 'days_per_week', 'specific_days_month', 'days_per_month'] as const).map(type => (
+                    <button key={type} className={`seg-btn${scheduleType === type ? ' active' : ''}`} onClick={() => setScheduleType(type)}>
+                      {type === 'daily' ? 'Every day'
+                        : type === 'specific_days_week' ? 'Specific days'
+                        : type === 'days_per_week' ? 'X days/week'
+                        : type === 'specific_days_month' ? 'Specific dates'
+                        : 'X days/month'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {scheduleType === 'specific_days_week' && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {DAYS_SHORT.map((d, i) => (
                     <button key={d} className={`day-btn${scheduleDays.includes(i) ? ' active' : ''}`}
                       onClick={() => toggleScheduleDay(i)}
@@ -242,14 +277,14 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
               )}
 
               {scheduleType === 'days_per_week' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-                  <input type="number" min={1} max={7} value={scheduleCount} onChange={e => setScheduleCount(Number(e.target.value))} className="text-input" style={{ width: 64, padding: '8px 12px' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="number" min={1} max={7} value={scheduleCount} onChange={e => setScheduleCount(Number(e.target.value))} className="text-input" style={{ width: 72 }} />
                   <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>days per week</span>
                 </div>
               )}
 
               {scheduleType === 'specific_days_month' && (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 10 }}>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
                     <button key={d} className={`day-btn${scheduleDays.includes(d) ? ' active' : ''}`}
                       onClick={() => toggleScheduleDay(d)}
@@ -261,36 +296,86 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
               )}
 
               {scheduleType === 'days_per_month' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-                  <input type="number" min={1} max={31} value={scheduleCount} onChange={e => setScheduleCount(Number(e.target.value))} className="text-input" style={{ width: 64, padding: '8px 12px' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="number" min={1} max={31} value={scheduleCount} onChange={e => setScheduleCount(Number(e.target.value))} className="text-input" style={{ width: 72 }} />
                   <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>days per month</span>
                 </div>
               )}
             </div>
+          )}
 
-            {/* Goal */}
-            <div>
-              <div className="form-label">Goal</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {(['day', 'week', 'month'] as const).map(p => (
-                    <button key={p} className={`seg-btn${goalPeriod === p ? ' active' : ''}`} onClick={() => setGoalPeriod(p)}>
-                      {p.charAt(0).toUpperCase() + p.slice(1)}
-                    </button>
-                  ))}
+          {/* Step 2: Goal */}
+          {addStep === 2 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div className="form-label" style={{ marginBottom: 8 }}>Goal</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <input
+                    type="number"
+                    min={1}
+                    value={goalValue}
+                    onChange={e => setGoalValue(Math.max(1, Number(e.target.value)))}
+                    className="text-input"
+                    style={{ width: 80, textAlign: 'center', fontSize: 22, fontWeight: 700, padding: '14px' }}
+                  />
+                  <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>× per</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {(['day', 'week', 'month'] as const).map(p => (
+                      <button key={p} className={`seg-btn${goalPeriod === p ? ' active' : ''}`} onClick={() => setGoalPeriod(p)}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input type="number" min={1} value={goalValue} onChange={e => setGoalValue(Math.max(1, Number(e.target.value)))} className="text-input" style={{ width: 64, padding: '8px 12px' }} />
-                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>× per {PERIOD_LABEL[goalPeriod]}</span>
+              </div>
+              <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Summary</div>
+                <div style={{ fontSize: 14, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: newColor, flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{newName || 'Untitled'}</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                  {scheduleType === 'daily' ? 'Every day' :
+                   scheduleType === 'specific_days_week' ? `${scheduleDays.map(d => DAYS_SHORT[d]).join(', ') || 'pick days'}` :
+                   scheduleType === 'days_per_week' ? `${scheduleCount} day${scheduleCount !== 1 ? 's' : ''}/week` :
+                   scheduleType === 'specific_days_month' ? `${scheduleDays.length ? scheduleDays.join(', ') : 'pick dates'} of month` :
+                   `${scheduleCount} day${scheduleCount !== 1 ? 's' : ''}/month`}
+                  {' · '}{goalValue}× per {PERIOD_LABEL[goalPeriod]}
                 </div>
               </div>
             </div>
+          )}
 
-            <div>
-              <button className="btn-primary" style={{ padding: '10px 20px', fontSize: 13 }} onClick={addHabit}>Add habit</button>
-            </div>
+          {/* Footer */}
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', marginTop: 22 }}>
+            <button
+              className="btn-secondary"
+              style={{ fontSize: 13 }}
+              onClick={() => addStep === 0 ? closeAdd() : setAddStep(s => s - 1)}
+            >
+              {addStep === 0 ? 'Cancel' : 'Back'}
+            </button>
+            {addStep < 2 ? (
+              <button
+                className="btn-primary"
+                style={{ fontSize: 13 }}
+                disabled={addStep === 0 && !newName.trim()}
+                onClick={() => setAddStep(s => s + 1)}
+              >
+                Continue
+              </button>
+            ) : (
+              <button
+                className="btn-primary"
+                style={{ fontSize: 13 }}
+                disabled={!newName.trim()}
+                onClick={addHabit}
+              >
+                Add habit
+              </button>
+            )}
           </div>
-        )}
+        </BottomSheet>
 
         {habits.length === 0 && !adding && (
           <div className="empty-state">No habits yet — add one to start tracking.</div>

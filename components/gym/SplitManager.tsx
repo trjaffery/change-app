@@ -3,7 +3,9 @@ import { useCallback, useEffect, useState } from 'react';
 
 const DAYS_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string; position: number }
+interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string; body_part: string | null; position: number }
+
+const BODY_PARTS = ['Chest', 'Back', 'Shoulders', 'Arms', 'Legs', 'Core', 'Cardio'];
 interface SplitDay { id: string; name: string; day_of_week: number[] | null; position: number; split_exercises: SplitExercise[] }
 interface Split { id: string; name: string; is_active: boolean; split_days: SplitDay[] }
 
@@ -19,6 +21,7 @@ export default function SplitManager() {
   const [newEx, setNewEx] = useState('');
   const [newExSets, setNewExSets] = useState(3);
   const [newExReps, setNewExReps] = useState('8');
+  const [newExBodyPart, setNewExBodyPart] = useState('');
   const [allExercises, setAllExercises] = useState<string[]>([]);
   // Inline editing state
   const [editingSplitName, setEditingSplitName] = useState<string | null>(null);
@@ -29,6 +32,7 @@ export default function SplitManager() {
   const [editExVal, setEditExVal] = useState('');
   const [editExSets, setEditExSets] = useState(3);
   const [editExReps, setEditExReps] = useState('8');
+  const [editExBodyPart, setEditExBodyPart] = useState('');
 
   const fetchSplits = useCallback(async () => {
     const res = await fetch('/api/gym/splits');
@@ -73,8 +77,8 @@ export default function SplitManager() {
 
   async function addExercise(dayId: string) {
     if (!newEx.trim()) return;
-    await fetch(`/api/gym/split-days/${dayId}/exercises`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exercise: newEx.trim(), target_sets: newExSets, target_reps: newExReps }) });
-    setNewEx(''); setNewExSets(3); setNewExReps('8'); setAddingEx(null); fetchSplits();
+    await fetch(`/api/gym/split-days/${dayId}/exercises`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exercise: newEx.trim(), target_sets: newExSets, target_reps: newExReps, body_part: newExBodyPart || null }) });
+    setNewEx(''); setNewExSets(3); setNewExReps('8'); setNewExBodyPart(''); setAddingEx(null); fetchSplits();
   }
 
   async function deleteExercise(id: string) {
@@ -92,7 +96,7 @@ export default function SplitManager() {
   }
 
   async function saveExercise(id: string) {
-    await patch(`/api/gym/split-exercises/${id}`, { exercise: editExVal.trim(), target_sets: editExSets, target_reps: editExReps });
+    await patch(`/api/gym/split-exercises/${id}`, { exercise: editExVal.trim(), target_sets: editExSets, target_reps: editExReps, body_part: editExBodyPart || null });
     setEditingExId(null);
   }
 
@@ -167,19 +171,26 @@ export default function SplitManager() {
                       {day.split_exercises.map((ex, i) => (
                         <div key={ex.id}>
                           {editingExId === ex.id ? (
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '6px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', marginBottom: 4 }}>
-                              <input className="text-input" list="ex-suggestions-edit" value={editExVal} onChange={e => setEditExVal(e.target.value)} style={{ flex: 1, padding: '5px 8px', fontSize: 12 }} />
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '6px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', marginBottom: 4 }}>
+                              <input className="text-input" list="ex-suggestions-edit" value={editExVal} onChange={e => setEditExVal(e.target.value)} style={{ flex: 1, minWidth: 100, padding: '5px 8px', fontSize: 12 }} />
                               <input className="text-input" type="number" min={1} max={20} value={editExSets} onChange={e => setEditExSets(Number(e.target.value))} style={{ width: 52, padding: '5px 8px', fontSize: 12 }} />
                               <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>×</span>
                               <input className="text-input" value={editExReps} onChange={e => setEditExReps(e.target.value)} style={{ width: 56, padding: '5px 8px', fontSize: 12 }} />
+                              <select value={editExBodyPart} onChange={e => setEditExBodyPart(e.target.value)} className="text-input" style={{ width: 110, padding: '5px 8px', fontSize: 12, background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)' }}>
+                                <option value="">No body part</option>
+                                {BODY_PARTS.map(b => <option key={b} value={b}>{b}</option>)}
+                              </select>
                               <button className="btn-primary" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => saveExercise(ex.id)}>Save</button>
                               <button className="split-icon-btn" onClick={() => setEditingExId(null)}>×</button>
                             </div>
                           ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.025)', marginBottom: 4, cursor: 'pointer' }}
-                              onClick={() => { setEditingExId(ex.id); setEditExVal(ex.exercise); setEditExSets(ex.target_sets); setEditExReps(ex.target_reps); }}>
+                              onClick={() => { setEditingExId(ex.id); setEditExVal(ex.exercise); setEditExSets(ex.target_sets); setEditExReps(ex.target_reps); setEditExBodyPart(ex.body_part ?? ''); }}>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', width: 16 }}>{i + 1}</span>
                               <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{ex.exercise}</span>
+                              {ex.body_part && (
+                                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 5, background: 'rgba(255,255,255,0.05)', color: 'var(--text-tertiary)' }}>{ex.body_part}</span>
+                              )}
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{ex.target_sets}×{ex.target_reps}</span>
                               <button className="split-icon-btn" onClick={e => { e.stopPropagation(); deleteExercise(ex.id); }}>×</button>
                             </div>
@@ -197,6 +208,10 @@ export default function SplitManager() {
                             <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>sets ×</span>
                             <input className="text-input" value={newExReps} onChange={e => setNewExReps(e.target.value)} style={{ width: 70 }} placeholder="Reps" />
                             <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>reps</span>
+                            <select value={newExBodyPart} onChange={e => setNewExBodyPart(e.target.value)} className="text-input" style={{ width: 130, background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)' }}>
+                              <option value="">Body part…</option>
+                              {BODY_PARTS.map(b => <option key={b} value={b}>{b}</option>)}
+                            </select>
                             <button className="btn-primary" style={{ padding: '7px 12px', fontSize: 12 }} onClick={() => addExercise(day.id)}>Add</button>
                             <button className="btn-secondary" style={{ padding: '7px 10px', fontSize: 12 }} onClick={() => setAddingEx(null)}>Cancel</button>
                           </div>

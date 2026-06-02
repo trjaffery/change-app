@@ -123,9 +123,11 @@ CREATE TABLE IF NOT EXISTS split_exercises (
   exercise TEXT NOT NULL,
   target_sets INTEGER NOT NULL DEFAULT 3,
   target_reps TEXT NOT NULL DEFAULT '8',
+  body_part TEXT,
   position INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE split_exercises ADD COLUMN IF NOT EXISTS body_part TEXT;
 
 -- Add split_day_id to gym_sets to link logged sets to templates
 -- ALTER TABLE gym_sets ADD COLUMN IF NOT EXISTS split_day_id UUID REFERENCES split_days(id);
@@ -138,5 +140,9 @@ CREATE TABLE IF NOT EXISTS gym_sessions (
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ended_at TIMESTAMPTZ,
   duration_seconds INTEGER,
+  rpe INTEGER CHECK (rpe BETWEEN 1 AND 10),
+  notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE gym_sessions ADD COLUMN IF NOT EXISTS rpe INTEGER;
+ALTER TABLE gym_sessions ADD COLUMN IF NOT EXISTS notes TEXT;
