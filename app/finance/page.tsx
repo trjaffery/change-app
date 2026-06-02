@@ -768,7 +768,7 @@ export default function FinancePage() {
   }
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'networth', label: 'Net Worth' },
+    { id: 'networth', label: 'Home' },
     { id: 'transactions', label: 'Spending' },
     { id: 'subscriptions', label: 'Subscriptions' },
     { id: 'orders', label: 'Orders' },

@@ -247,22 +247,54 @@ export default function WorkoutSession({
         .ws-check:disabled { opacity:0.3; cursor:default; }
         .ws-suggest { font-size:11px; padding:5px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.10); background:rgba(255,255,255,0.04); color:var(--text-secondary); cursor:pointer; transition:background 0.15s; }
         .ws-suggest:hover { background:rgba(255,255,255,0.08); }
+        /* Timer bar — sticky to the top of the viewport so End is always tap-reachable
+           even when the user is deep in the exercise list. Honors the iPhone notch via
+           env(safe-area-inset-top). */
+        .ws-timer-bar {
+          position: sticky;
+          top: calc(env(safe-area-inset-top) + 8px);
+          z-index: 20;
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 10px;
+          padding: 12px 16px;
+          margin-bottom: 20px;
+          border-radius: 14px;
+          background: rgba(8, 8, 10, 0.78);
+          border: 1px solid rgba(107,227,164,0.22);
+          backdrop-filter: blur(20px) saturate(1.3);
+          -webkit-backdrop-filter: blur(20px) saturate(1.3);
+          box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+        }
+        @media (max-width: 640px) {
+          .ws-timer-bar {
+            /* Tight padding on mobile so the three blocks (label, clock, End) all fit
+               on a 375px screen without wrapping. */
+            padding: 10px 12px;
+            gap: 8px;
+            font-size: 12px;
+          }
+          .ws-timer-clock { font-size: 24px !important; }
+          .ws-timer-end {
+            padding: 10px 14px !important;
+            min-height: 40px;
+          }
+        }
       `}</style>
 
-      {/* Timer bar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderRadius: 14, background: 'rgba(107,227,164,0.06)', border: '1px solid rgba(107,227,164,0.18)', marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{dayLabel}</div>
+      {/* Timer bar — sticky at top so the End button is always reachable */}
+      <div className="ws-timer-bar">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dayLabel}</div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 1 }}>
             {doneCount} set{doneCount !== 1 ? 's' : ''} logged
           </div>
         </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 32, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--success)' }}>
+        <div className="ws-timer-clock" style={{ fontFamily: 'var(--font-mono)', fontSize: 30, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--success)', flexShrink: 0 }}>
           {formatTime(elapsed)}
         </div>
         <button
-          className="btn-danger"
-          style={{ padding: '10px 18px', fontSize: 13 }}
+          className="btn-danger ws-timer-end"
+          style={{ padding: '10px 18px', fontSize: 13, flexShrink: 0 }}
           onClick={() => setShowFinish(true)}
         >
           End
