@@ -13,6 +13,13 @@ interface ExerciseBlock {
   targetReps: string;
   rows: SetRow[];
   aiState: { label: string; response: string; loading: boolean } | null;
+  lastSet: { weight: number; reps: number; daysAgo: number } | null;
+}
+
+function daysBetween(isoDate: string): number {
+  const past = new Date(isoDate + 'T12:00:00').getTime();
+  const now = Date.now();
+  return Math.max(0, Math.floor((now - past) / 86400000));
 }
 
 function formatTime(seconds: number): string {
@@ -95,6 +102,7 @@ export default function WorkoutSession({
         exercise, splitExId: null, targetSets: sets.length, targetReps: '',
         rows: sets.map(s => ({ reps: String(s.reps), weight: String(s.weight), loggedId: s.id })),
         aiState: null,
+        lastSet: null,
       })));
       setLoading(false);
       return;
@@ -115,8 +123,18 @@ export default function WorkoutSession({
     for (const s of todaySets) { if (!todayByEx[s.exercise]) todayByEx[s.exercise] = []; todayByEx[s.exercise].push(s); }
 
     setBlocks(exercises.map((ex, i) => {
-      const hist: { sets: { reps: number; weight: number }[] }[] = histories[i] ?? [];
-      const lastWeight = hist.length > 0 ? String(hist[hist.length - 1].sets.at(-1)?.weight ?? '') : '';
+      const hist: { date: string; sets: { reps: number; weight: number }[] }[] = histories[i] ?? [];
+      const lastSession = hist.length > 0 ? hist[hist.length - 1] : null;
+      const lastWeight = lastSession ? String(lastSession.sets.at(-1)?.weight ?? '') : '';
+      // Last-set summary: heaviest set of the previous session, ties broken by reps.
+      let lastSet: ExerciseBlock['lastSet'] = null;
+      if (lastSession && lastSession.sets.length > 0) {
+        const top = lastSession.sets.reduce(
+          (best, s) => (s.weight > best.weight || (s.weight === best.weight && s.reps > best.reps) ? s : best),
+          lastSession.sets[0],
+        );
+        lastSet = { weight: top.weight, reps: top.reps, daysAgo: daysBetween(lastSession.date) };
+      }
       const logged = todayByEx[ex.exercise] ?? [];
       let rows: SetRow[];
       if (logged.length > 0) {
@@ -125,7 +143,7 @@ export default function WorkoutSession({
       } else {
         rows = makeRows(ex.target_sets, lastWeight, ex.target_reps.split('-')[0]);
       }
-      return { exercise: ex.exercise, splitExId: ex.id, targetSets: ex.target_sets, targetReps: ex.target_reps, rows, aiState: null };
+      return { exercise: ex.exercise, splitExId: ex.id, targetSets: ex.target_sets, targetReps: ex.target_reps, rows, aiState: null, lastSet };
     }));
     setLoading(false);
   }, [splitDayId, today]);
@@ -209,7 +227,7 @@ export default function WorkoutSession({
 
   async function addFreeExercise() {
     if (!freeEx.trim()) return;
-    setBlocks(prev => [...prev, { exercise: freeEx.trim(), splitExId: null, targetSets: 3, targetReps: '', rows: makeRows(3, '', ''), aiState: null }]);
+    setBlocks(prev => [...prev, { exercise: freeEx.trim(), splitExId: null, targetSets: 3, targetReps: '', rows: makeRows(3, '', ''), aiState: null, lastSet: null }]);
     setFreeEx('');
   }
 
@@ -238,68 +256,360 @@ export default function WorkoutSession({
   return (
     <>
       <style>{`
-        .ws-exercise { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:16px 18px; margin-bottom:12px; }
-        .ws-set-row { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; background:rgba(255,255,255,0.025); margin-bottom:5px; }
-        .ws-set-row.done { background:rgba(107,227,164,0.06); border:1px solid rgba(107,227,164,0.15); }
-        .ws-num-input { width:70px; font-family:var(--font-mono); font-size:13px; }
-        .ws-check { width:30px; height:30px; border-radius:8px; border:1px solid rgba(107,227,164,0.35); background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.15s; }
-        .ws-check.done { background:rgba(107,227,164,0.15); border-color:var(--success); }
-        .ws-check:disabled { opacity:0.3; cursor:default; }
-        .ws-suggest { font-size:11px; padding:5px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.10); background:rgba(255,255,255,0.04); color:var(--text-secondary); cursor:pointer; transition:background 0.15s; }
-        .ws-suggest:hover { background:rgba(255,255,255,0.08); }
-        /* Timer bar — sticky to the top of the viewport so End is always tap-reachable
-           even when the user is deep in the exercise list. Honors the iPhone notch via
-           env(safe-area-inset-top). */
-        .ws-timer-bar {
+        /* ─────────────────────────────────────────────────────────────────
+           Workout session — "printout" aesthetic.
+           Mono numbers dominate; labels are tiny uppercase mono; each section
+           is a flat strip separated by thin rules. Rows are 38px tall.
+           ───────────────────────────────────────────────────────────────── */
+
+        /* Sticky timer bar — slim, glass, accessible from anywhere on the page */
+        .ws-timer {
           position: sticky;
           top: calc(env(safe-area-inset-top) + 8px);
           z-index: 20;
-          display: flex; align-items: center; justify-content: space-between;
-          gap: 10px;
-          padding: 12px 16px;
-          margin-bottom: 20px;
+          display: grid;
+          grid-template-columns: 1fr auto auto;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 14px;
+          margin-bottom: 18px;
           border-radius: 14px;
-          background: rgba(8, 8, 10, 0.78);
+          background: rgba(8,8,10,0.82);
           border: 1px solid rgba(107,227,164,0.22);
-          backdrop-filter: blur(20px) saturate(1.3);
-          -webkit-backdrop-filter: blur(20px) saturate(1.3);
-          box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+          backdrop-filter: blur(22px) saturate(1.3);
+          -webkit-backdrop-filter: blur(22px) saturate(1.3);
+          box-shadow: 0 10px 28px rgba(0,0,0,0.42);
         }
+        .ws-timer-meta { min-width: 0; }
+        .ws-timer-day {
+          font-size: 12px; font-weight: 600; color: var(--text-secondary);
+          letter-spacing: -0.005em;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .ws-timer-progress {
+          font-family: var(--font-mono);
+          font-size: 9.5px; color: var(--text-tertiary);
+          letter-spacing: 0.08em; text-transform: uppercase;
+          margin-top: 2px;
+        }
+        .ws-timer-clock {
+          font-family: var(--font-mono);
+          font-size: 28px; font-weight: 700; letter-spacing: -0.04em;
+          color: var(--success); font-variant-numeric: tabular-nums;
+          line-height: 1;
+        }
+        .ws-timer-end {
+          padding: 9px 16px;
+          font-family: var(--font-mono);
+          font-size: 11px; font-weight: 700;
+          letter-spacing: 0.14em; text-transform: uppercase;
+          border-radius: 10px;
+          border: 1px solid rgba(255,107,107,0.32);
+          background: rgba(255,107,107,0.08);
+          color: var(--danger);
+          cursor: pointer;
+          min-height: 38px;
+          transition: background 160ms ease;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .ws-timer-end:active { transform: scale(0.97); }
+
+        /* Top-level progress dots — one per planned set */
+        .ws-dots {
+          display: flex; gap: 4px; flex-wrap: wrap;
+          margin: -8px 2px 18px;
+          padding: 0 2px;
+        }
+        .ws-dot {
+          flex: 1 1 0; height: 3px; min-width: 14px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.08);
+          transition: background 240ms ease, box-shadow 240ms ease;
+        }
+        .ws-dot.done {
+          background: var(--success);
+          box-shadow: 0 0 8px rgba(107,227,164,0.55);
+        }
+
+        /* ─── EXERCISE SECTION ───────────────────────────────────────── */
+        .ws-section {
+          margin-bottom: 18px;
+        }
+        .ws-section + .ws-section {
+          padding-top: 18px;
+          border-top: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .ws-section-head {
+          display: flex; align-items: baseline; gap: 8px;
+          margin-bottom: 8px;
+        }
+        .ws-section-num {
+          font-family: var(--font-mono);
+          font-size: 10px; font-weight: 600;
+          color: var(--text-tertiary);
+          letter-spacing: 0.04em;
+          flex-shrink: 0;
+        }
+        .ws-section-name {
+          font-family: var(--font-mono);
+          font-size: 13px; font-weight: 700;
+          color: var(--text-primary);
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .ws-section-target {
+          font-family: var(--font-mono);
+          font-size: 10px;
+          color: var(--text-tertiary);
+          letter-spacing: 0.05em;
+          flex-shrink: 0;
+        }
+        .ws-section-last {
+          font-family: var(--font-mono);
+          font-size: 10px;
+          color: rgba(107,227,164,0.78);
+          letter-spacing: 0.02em;
+          margin-left: auto;
+          flex-shrink: 0;
+        }
+        .ws-section-ai {
+          width: 28px; height: 28px;
+          padding: 0;
+          border-radius: 8px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: transparent;
+          color: var(--text-tertiary);
+          font-size: 14px; line-height: 1;
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: background 160ms ease, color 160ms ease;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .ws-section-ai:hover, .ws-section-ai:focus-visible {
+          background: rgba(255,255,255,0.05);
+          color: var(--text-primary);
+        }
+        .ws-section-ai:active { transform: scale(0.96); }
+
+        /* ─── SET ROW ─────────────────────────────────────────────────── */
+        .ws-set {
+          display: grid;
+          grid-template-columns: 22px 1fr 12px 1fr 22px 38px;
+          align-items: center;
+          gap: 8px;
+          height: 42px;
+          padding: 0 8px;
+          border-radius: 10px;
+          position: relative;
+        }
+        .ws-set + .ws-set { margin-top: 2px; }
+        .ws-set.active {
+          background: rgba(107,227,164,0.05);
+        }
+        .ws-set.active::before {
+          content: '';
+          position: absolute; left: -2px; top: 8px; bottom: 8px;
+          width: 2px; border-radius: 2px;
+          background: var(--success);
+          box-shadow: 0 0 8px rgba(107,227,164,0.55);
+        }
+        .ws-set.logged { opacity: 0.72; }
+
+        .ws-set-idx {
+          font-family: var(--font-mono);
+          font-size: 10px; font-weight: 600;
+          color: var(--text-tertiary);
+          letter-spacing: 0.04em;
+          text-align: center;
+        }
+        .ws-set-num {
+          font-family: var(--font-mono);
+          font-size: 19px; font-weight: 700;
+          font-variant-numeric: tabular-nums;
+          color: var(--text-primary);
+          letter-spacing: -0.02em;
+          text-align: right;
+          line-height: 1;
+        }
+        .ws-set.logged .ws-set-num { color: var(--success); }
+        .ws-set-x {
+          font-family: var(--font-mono);
+          font-size: 12px;
+          color: var(--text-tertiary);
+          text-align: center;
+        }
+        .ws-set-input {
+          font-family: var(--font-mono);
+          font-size: 19px; font-weight: 700;
+          font-variant-numeric: tabular-nums;
+          letter-spacing: -0.02em;
+          background: transparent;
+          border: none;
+          outline: none;
+          color: var(--text-primary);
+          padding: 0;
+          text-align: right;
+          width: 100%;
+          min-width: 0;
+        }
+        .ws-set-input::placeholder { color: rgba(255,255,255,0.18); font-weight: 600; }
+        /* Hide native number-input spinners */
+        .ws-set-input::-webkit-outer-spin-button,
+        .ws-set-input::-webkit-inner-spin-button {
+          -webkit-appearance: none; margin: 0;
+        }
+        .ws-set-input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+        .ws-set-unit {
+          font-family: var(--font-mono);
+          font-size: 9px;
+          color: var(--text-tertiary);
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          text-align: left;
+        }
+        .ws-set-check {
+          width: 30px; height: 30px;
+          border-radius: 8px;
+          border: 1px solid rgba(107,227,164,0.32);
+          background: transparent;
+          cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          flex-shrink: 0;
+          transition: background 140ms ease, border-color 140ms ease, transform 100ms ease;
+          -webkit-tap-highlight-color: transparent;
+          padding: 0;
+          /* Ensure 44pt touch target via larger hit area */
+          margin: 7px 4px;
+        }
+        .ws-set-check.done {
+          background: rgba(107,227,164,0.18);
+          border-color: var(--success);
+        }
+        .ws-set-check:disabled { opacity: 0.28; cursor: default; }
+        .ws-set-check:not(:disabled):active { transform: scale(0.92); }
+
+        /* Slim rest-timer strip below the row that triggered it */
+        .ws-rest {
+          display: grid;
+          grid-template-columns: 1fr auto auto;
+          align-items: center;
+          gap: 12px;
+          height: 30px;
+          padding: 0 10px;
+          margin: 4px 0 2px;
+          border-radius: 8px;
+          background: rgba(242,192,99,0.07);
+          border: 1px solid rgba(242,192,99,0.22);
+        }
+        .ws-rest-label {
+          font-family: var(--font-mono);
+          font-size: 9px; font-weight: 700;
+          color: #F2C063;
+          letter-spacing: 0.18em; text-transform: uppercase;
+        }
+        .ws-rest-time {
+          font-family: var(--font-mono);
+          font-size: 14px; font-weight: 700;
+          color: #F2C063;
+          letter-spacing: -0.02em;
+          font-variant-numeric: tabular-nums;
+        }
+        .ws-rest-skip {
+          background: transparent;
+          border: none;
+          color: rgba(242,192,99,0.8);
+          font-family: var(--font-mono); font-size: 10px;
+          letter-spacing: 0.12em; text-transform: uppercase;
+          cursor: pointer; padding: 4px 8px; border-radius: 4px;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .ws-add-set {
+          margin-top: 6px;
+          padding: 6px 10px;
+          background: transparent;
+          border: none;
+          color: var(--text-tertiary);
+          font-family: var(--font-mono);
+          font-size: 10px; font-weight: 600;
+          letter-spacing: 0.16em; text-transform: uppercase;
+          cursor: pointer;
+          transition: color 140ms ease;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .ws-add-set:hover { color: var(--text-secondary); }
+
+        .ws-ai {
+          margin-top: 8px; padding: 10px 12px;
+          border-radius: 10px;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.06);
+          font-size: 12px; line-height: 1.55; color: var(--text-secondary);
+        }
+        .ws-ai strong {
+          display: block;
+          font-family: var(--font-mono); font-size: 11px;
+          letter-spacing: 0.06em;
+          color: var(--success);
+          margin-bottom: 4px;
+        }
+
+        /* Add freeform exercise at bottom — tiny, unobtrusive */
+        .ws-add-ex {
+          display: flex; align-items: center; gap: 6px;
+          margin-top: 22px; padding: 8px 10px;
+          border: 1px dashed rgba(255,255,255,0.10);
+          border-radius: 10px;
+          background: transparent;
+        }
+        .ws-add-ex input {
+          flex: 1; min-width: 0;
+          background: transparent; border: none; outline: none;
+          font-family: var(--font-sans); font-size: 14px;
+          color: var(--text-primary);
+          padding: 4px 2px;
+          min-height: 32px;
+        }
+        .ws-add-ex input::placeholder { color: var(--text-tertiary); }
+        .ws-add-ex button {
+          background: transparent; border: none;
+          color: var(--text-tertiary);
+          font-family: var(--font-mono); font-size: 16px; font-weight: 600;
+          padding: 4px 10px; cursor: pointer;
+          min-height: 32px;
+          -webkit-tap-highlight-color: transparent;
+        }
+
         @media (max-width: 640px) {
-          .ws-timer-bar {
-            /* Tight padding on mobile so the three blocks (label, clock, End) all fit
-               on a 375px screen without wrapping. */
-            padding: 10px 12px;
-            gap: 8px;
-            font-size: 12px;
-          }
-          .ws-timer-clock { font-size: 24px !important; }
-          .ws-timer-end {
-            padding: 10px 14px !important;
-            min-height: 40px;
-          }
+          .ws-timer-clock { font-size: 24px; }
+          .ws-set { height: 40px; }
         }
       `}</style>
 
-      {/* Timer bar — sticky at top so the End button is always reachable */}
-      <div className="ws-timer-bar">
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dayLabel}</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 1 }}>
-            {doneCount} set{doneCount !== 1 ? 's' : ''} logged
+      {/* Sticky timer bar */}
+      <div className="ws-timer">
+        <div className="ws-timer-meta">
+          <div className="ws-timer-day">{dayLabel || 'Free workout'}</div>
+          <div className="ws-timer-progress">
+            {doneCount} / {blocks.reduce((n, b) => n + b.rows.length, 0)} sets
           </div>
         </div>
-        <div className="ws-timer-clock" style={{ fontFamily: 'var(--font-mono)', fontSize: 30, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--success)', flexShrink: 0 }}>
-          {formatTime(elapsed)}
-        </div>
-        <button
-          className="btn-danger ws-timer-end"
-          style={{ padding: '10px 18px', fontSize: 13, flexShrink: 0 }}
-          onClick={() => setShowFinish(true)}
-        >
-          End
-        </button>
+        <div className="ws-timer-clock">{formatTime(elapsed)}</div>
+        <button className="ws-timer-end" onClick={() => setShowFinish(true)}>End</button>
       </div>
+
+      {/* Progress dots — one per planned set, top of session view */}
+      {blocks.length > 0 && (
+        <div className="ws-dots" aria-hidden>
+          {blocks.flatMap((b, bi) =>
+            b.rows.map((r, ri) => (
+              <span key={`${bi}-${ri}`} className={`ws-dot${r.loggedId ? ' done' : ''}`} />
+            ))
+          )}
+        </div>
+      )}
 
       <BottomSheet
         open={showFinish}
@@ -352,69 +662,124 @@ export default function WorkoutSession({
         </div>
       </BottomSheet>
 
-      {/* Exercise blocks */}
-      {blocks.map((block, bi) => (
-        <div key={`${block.exercise}-${bi}`} className="ws-exercise">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{block.exercise}</div>
+      {/* Exercise sections — flat, dense, mono-driven */}
+      {blocks.map((block, bi) => {
+        // Index of the first un-logged row in this block; that's the "active" set.
+        const activeIdx = block.rows.findIndex(r => !r.loggedId);
+        const lastTone = block.lastSet?.daysAgo === 0 ? 'today'
+          : block.lastSet?.daysAgo === 1 ? 'yest'
+          : `${block.lastSet?.daysAgo}d`;
+        return (
+          <section key={`${block.exercise}-${bi}`} className="ws-section">
+            <header className="ws-section-head">
+              <span className="ws-section-num">{String(bi + 1).padStart(2, '0')}</span>
+              <span className="ws-section-name">{block.exercise}</span>
               {block.targetReps && (
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                  {block.targetSets} × {block.targetReps}
-                </div>
+                <span className="ws-section-target">· {block.targetSets}×{block.targetReps}</span>
               )}
-            </div>
-            <button className="ws-suggest" disabled={block.aiState?.loading} onClick={() => suggestAI(bi)}>
-              {block.aiState?.loading ? '…' : 'AI suggest'}
+              {block.lastSet && (
+                <span className="ws-section-last">
+                  ↘ {block.lastSet.weight}×{block.lastSet.reps} · {lastTone}
+                </span>
+              )}
+              <button
+                className="ws-section-ai"
+                disabled={block.aiState?.loading}
+                onClick={() => suggestAI(bi)}
+                aria-label="AI suggest"
+                title="AI suggestion"
+              >
+                {block.aiState?.loading ? '…' : '✦'}
+              </button>
+            </header>
+
+            {block.rows.map((row, ri) => {
+              const logged = !!row.loggedId;
+              const isActive = !logged && ri === activeIdx;
+              const canLog = !logged && !!row.reps && !!row.weight;
+              return (
+                <Fragment key={ri}>
+                  <div className={`ws-set${logged ? ' logged' : isActive ? ' active' : ''}`}>
+                    <span className="ws-set-idx">{String(ri + 1).padStart(2, '0')}</span>
+                    {logged ? (
+                      <span className="ws-set-num">{row.reps}</span>
+                    ) : (
+                      <input
+                        className="ws-set-input"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        placeholder="—"
+                        value={row.reps}
+                        onChange={e => updateRow(bi, ri, 'reps', e.target.value)}
+                      />
+                    )}
+                    <span className="ws-set-x">×</span>
+                    {logged ? (
+                      <span className="ws-set-num">{row.weight}</span>
+                    ) : (
+                      <input
+                        className="ws-set-input"
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step={0.5}
+                        placeholder="—"
+                        value={row.weight}
+                        onChange={e => updateRow(bi, ri, 'weight', e.target.value)}
+                      />
+                    )}
+                    <span className="ws-set-unit">lb</span>
+                    <button
+                      className={`ws-set-check${logged ? ' done' : ''}`}
+                      disabled={!logged && !canLog}
+                      onClick={() => logged ? unlogSet(bi, ri) : logSet(bi, ri)}
+                      aria-label={logged ? 'Un-log set' : 'Log set'}
+                    >
+                      {logged && (
+                        <svg width="14" height="14" viewBox="0 0 13 13" fill="none">
+                          <path d="M2 6.5L5.2 9.5L11 3.5" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+
+                  {restingAt?.bi === bi && restingAt?.ri === ri && restRemaining !== null && (
+                    <div className="ws-rest">
+                      <span className="ws-rest-label">Rest</span>
+                      <span className="ws-rest-time">{formatTime(restRemaining)}</span>
+                      <button className="ws-rest-skip" onClick={skipRest}>Skip</button>
+                    </div>
+                  )}
+                </Fragment>
+              );
+            })}
+
+            <button className="ws-add-set" onClick={() => addSetRow(bi)}>
+              + Add set
             </button>
-          </div>
 
-          {block.rows.map((row, ri) => (
-            <Fragment key={ri}>
-              <div className={`ws-set-row${row.loggedId ? ' done' : ''}`}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', width: 44, flexShrink: 0 }}>Set {ri + 1}</span>
-                <input className="text-input ws-num-input" type="number" min={1} placeholder="Reps"
-                  value={row.reps} disabled={!!row.loggedId} onChange={e => updateRow(bi, ri, 'reps', e.target.value)} />
-                <input className="text-input ws-num-input" type="number" min={0} step={0.5} placeholder="lbs"
-                  value={row.weight} disabled={!!row.loggedId} onChange={e => updateRow(bi, ri, 'weight', e.target.value)} />
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>lbs</span>
-                <button className={`ws-check${row.loggedId ? ' done' : ''}`} onClick={() => row.loggedId ? unlogSet(bi, ri) : logSet(bi, ri)}>
-                  {row.loggedId && <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5L5.2 9.5L11 3.5" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                </button>
+            {block.aiState && !block.aiState.loading && (
+              <div className="ws-ai">
+                {block.aiState.label && <strong>{block.aiState.label}</strong>}
+                {block.aiState.response}
               </div>
-              {restingAt?.bi === bi && restingAt?.ri === ri && restRemaining !== null && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderRadius: '0 0 8px 8px', background: 'rgba(242,192,99,0.08)', border: '1px solid rgba(242,192,99,0.22)', borderTop: 'none', marginBottom: 5, marginTop: -5 }}>
-                  <span style={{ fontSize: 11, color: '#F2C063', fontWeight: 600 }}>Rest</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 800, color: '#F2C063', letterSpacing: '-0.02em' }}>
-                    {formatTime(restRemaining)}
-                  </span>
-                  <button onClick={skipRest} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(242,192,99,0.3)', background: 'transparent', color: '#F2C063', cursor: 'pointer' }}>
-                    Skip
-                  </button>
-                </div>
-              )}
-            </Fragment>
-          ))}
+            )}
+          </section>
+        );
+      })}
 
-          <button className="btn-secondary" style={{ marginTop: 8, padding: '6px 14px', fontSize: 12 }} onClick={() => addSetRow(bi)}>
-            + Set
-          </button>
-
-          {block.aiState && !block.aiState.loading && (
-            <div className="ai-response" style={{ display: 'block', marginTop: 10 }}>
-              {block.aiState.label && <strong style={{ display: 'block', marginBottom: 4 }}>{block.aiState.label}</strong>}
-              {block.aiState.response}
-            </div>
-          )}
-        </div>
-      ))}
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 22 }}>
-        <input className="text-input" list="ws-ex-suggestions" placeholder="Add exercise…"
-          value={freeEx} onChange={e => setFreeEx(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && addFreeExercise()} style={{ flex: 1 }} />
+      <div className="ws-add-ex">
+        <input
+          list="ws-ex-suggestions"
+          placeholder="Add exercise"
+          value={freeEx}
+          onChange={e => setFreeEx(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && addFreeExercise()}
+          autoCapitalize="words"
+        />
         <datalist id="ws-ex-suggestions">{allExercises.map(e => <option key={e} value={e} />)}</datalist>
-        <button className="btn-secondary" style={{ padding: '10px 16px', fontSize: 13 }} onClick={addFreeExercise}>+ Add</button>
+        <button onClick={addFreeExercise} aria-label="Add exercise">+</button>
       </div>
     </>
   );

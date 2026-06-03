@@ -7,6 +7,7 @@ import ProgressGraph from '@/components/gym/ProgressGraph';
 import WorkoutHistory from '@/components/gym/WorkoutHistory';
 import ExerciseSparklineGrid from '@/components/gym/ExerciseSparklineGrid';
 import WorkoutAdherenceCard from '@/components/gym/WorkoutAdherenceCard';
+import BodyWeightCard from '@/components/gym/BodyWeightCard';
 
 const REST_PRESETS = [60, 90, 120, 180];
 
@@ -105,6 +106,7 @@ export default function GymPage() {
           >
             Start Workout
           </button>
+          <BodyWeightCard />
           <WorkoutAdherenceCard refreshKey={graphKey} />
           <WorkoutHistory refreshKey={graphKey} />
           <ExerciseSparklineGrid refreshKey={graphKey} />

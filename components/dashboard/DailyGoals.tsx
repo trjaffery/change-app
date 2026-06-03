@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getActiveDateString } from '@/lib/dates';
+import { getActiveDateString, getTomorrowDateString } from '@/lib/dates';
+import { useToast } from '@/components/layout/Toast';
 
 interface Goal {
   id: string;
@@ -12,12 +13,15 @@ interface Goal {
 
 export default function DailyGoals({ onChange }: { onChange?: (done: number, total: number) => void }) {
   const today = getActiveDateString();
+  const tomorrow = getTomorrowDateString();
+  const toast = useToast();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [newText, setNewText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [pushing, setPushing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const onChangeRef = useRef(onChange);
@@ -26,6 +30,14 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
   const fetchGoals = useCallback(async () => {
     setLoading(true);
     try {
+      // Roll yesterday's unfinished goals forward before fetching today's list.
+      // Idempotent — second call is a no-op since nothing's left to roll.
+      await fetch('/api/goals/roll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: today }),
+      }).catch(() => { /* silent — UI still shows what's in DB */ });
+
       const res = await fetch(`/api/goals?date=${today}`);
       const data = (await res.json()) as Goal[];
       const list = Array.isArray(data) ? data : [];
@@ -37,6 +49,46 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
   }, [today]);
 
   useEffect(() => { fetchGoals(); }, [fetchGoals]);
+
+  async function pushToTomorrow() {
+    if (pushing) return;
+    const undone = goals.filter(g => !g.done);
+    if (undone.length === 0) return;
+    setPushing(true);
+    // Optimistic — remove undone goals from today's view; the API moves them in DB.
+    const snapshot = goals;
+    const remaining = goals.filter(g => g.done);
+    setGoals(remaining);
+    notify(remaining);
+    try {
+      await fetch('/api/goals/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: today, to: tomorrow }),
+      });
+      toast({
+        kind: 'success',
+        message: `${undone.length} goal${undone.length !== 1 ? 's' : ''} pushed to tomorrow`,
+        undo: async () => {
+          // Reverse the push by rolling them back to today.
+          await fetch('/api/goals/push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ from: tomorrow, to: today }),
+          });
+          setGoals(snapshot);
+          notify(snapshot);
+        },
+      });
+    } catch (e) {
+      // Roll back optimistic state on network error.
+      setGoals(snapshot);
+      notify(snapshot);
+      toast({ kind: 'error', message: e instanceof Error ? e.message : 'Push failed' });
+    } finally {
+      setPushing(false);
+    }
+  }
 
   function notify(list: Goal[]) {
     onChangeRef.current?.(list.filter(g => g.done).length, list.length);
@@ -159,6 +211,29 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
         <div style={{ fontSize:13, color:'var(--text-tertiary)', padding:'4px 0 8px' }}>
           What do you want to make happen today?
         </div>
+      )}
+
+      {goals.some(g => !g.done) && total > 0 && (
+        <button
+          onClick={pushToTomorrow}
+          disabled={pushing}
+          style={{
+            marginTop: 12,
+            padding: '8px 12px',
+            border: '1px dashed rgba(255,255,255,0.14)',
+            borderRadius: 9,
+            background: 'transparent',
+            color: 'var(--text-tertiary)',
+            fontFamily: 'var(--font-sans)',
+            fontSize: 12,
+            cursor: 'pointer',
+            width: '100%',
+            transition: 'border-color 160ms ease, color 160ms ease',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          {pushing ? 'Pushing…' : '↪ Push remaining to tomorrow'}
+        </button>
       )}
 
       <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:8 }}>

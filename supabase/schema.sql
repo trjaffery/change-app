@@ -146,3 +146,24 @@ CREATE TABLE IF NOT EXISTS gym_sessions (
 );
 ALTER TABLE gym_sessions ADD COLUMN IF NOT EXISTS rpe INTEGER;
 ALTER TABLE gym_sessions ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Body weight (one row per day, lb)
+CREATE TABLE IF NOT EXISTS body_weight (
+  date DATE PRIMARY KEY,
+  weight NUMERIC NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Finance activity log (audit trail for items / subscriptions / orders / wishlist)
+-- entity_id is text (not a FK) so deletes still log without orphaning.
+-- snapshot is whatever is needed to render the row (name, amount, category).
+CREATE TABLE IF NOT EXISTS finance_activity (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  snapshot JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS finance_activity_created_idx ON finance_activity(created_at DESC);

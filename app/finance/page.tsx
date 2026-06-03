@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import EmptyState from '@/components/layout/EmptyState';
+import ActivityLog from '@/components/finance/ActivityLog';
 
 function cacheSet(key: string, data: unknown, ttlMs: number) {
   try {
@@ -1136,6 +1137,9 @@ export default function FinancePage() {
                   </div>
                 );
               })}
+
+              {/* Recent activity log — refreshes whenever any tracked entity count changes */}
+              <ActivityLog refreshKey={items.length + subs.length + orders.length + wishlist.length} />
 
               {/* Plaid connected accounts */}
               <div className="plaid-section">
