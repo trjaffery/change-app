@@ -11,9 +11,11 @@ export async function POST() {
 
   try {
   const sb = supabaseServer();
-  const [urgesRes, settingsRes] = await Promise.all([
+  const thirtyAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+  const [urgesRes, settingsRes, diaryRes] = await Promise.all([
     sb.from('recovery_urges').select('intensity, note, triggers, created_at').order('created_at', { ascending: true }),
     sb.from('recovery_settings').select('key, value'),
+    sb.from('diary_entries').select('date, body, mood').gte('date', thirtyAgo).order('date', { ascending: false }),
   ]);
 
   const urges = urgesRes.data ?? [];
@@ -69,6 +71,24 @@ export async function POST() {
   const secondHalfAvg = urges.slice(half).reduce((s, u) => s + u.intensity, 0) / (urges.length - half);
   const trend = secondHalfAvg > firstHalfAvg + 0.3 ? 'increasing' : secondHalfAvg < firstHalfAvg - 0.3 ? 'decreasing' : 'stable';
 
+  // Diary excerpts over the same window — rich qualitative signal beyond
+  // the urge log (which only captures moments the user chose to formally log).
+  const diaryEntries = (diaryRes.data ?? []).filter((d): d is { date: string; body: string; mood: number | null } => !!(d.body as string)?.trim());
+  const moodCounts = [0, 0, 0, 0, 0]; // index = mood-1
+  for (const d of diaryEntries) {
+    if (d.mood) moodCounts[d.mood - 1]++;
+  }
+  const moodDistLine = diaryEntries.some(d => d.mood)
+    ? `Mood distribution (${diaryEntries.filter(d => d.mood).length} tagged days): ${moodCounts.map((c, i) => `${i + 1}/5=${c}`).join(', ')}`
+    : '';
+  const diaryBlock = diaryEntries.length === 0
+    ? ''
+    : `\nDIARY ENTRIES THIS MONTH (newest first; mood 1=rough, 5=great):\n` + diaryEntries.map(d => {
+        const m = d.mood ? ` [mood ${d.mood}/5]` : '';
+        const trimmed = d.body.trim().replace(/\s+/g, ' ').slice(0, 360);
+        return `- ${d.date}${m}: "${trimmed}${d.body.length > 360 ? '…' : ''}"`;
+      }).join('\n');
+
   const prompt = `Recovery data for someone with ${streakDays !== null ? `${streakDays} days sober` : 'an ongoing recovery journey'}:
 - Total urges logged: ${urges.length}
 - Average urge intensity: ${avgIntensity}/5 (trend: ${trend})
@@ -77,11 +97,12 @@ export async function POST() {
 - Time breakdown: Morning ${timeCounts.Morning}, Afternoon ${timeCounts.Afternoon}, Evening ${timeCounts.Evening}, Night ${timeCounts.Night}
 - Common themes in urge notes: ${topWords.length ? topWords.join(', ') : 'no notes recorded'}
 - Trigger distribution: ${triggerSummary}
+${moodDistLine ? `- ${moodDistLine}\n` : ''}${diaryBlock}
 
 Return JSON with this exact shape:
 {"riskFactors":["2-3 specific risk factors based on their data"],"timePatterns":["2-3 observations about their timing patterns"],"copingStrategies":["3-4 concrete strategies tailored to their specific patterns"]}`;
 
-  const raw = await callAI(prompt, 'You are a recovery coach. Be specific, compassionate, and data-driven. Respond with compact JSON only. The user is Muslim. In the copingStrategies, you may include one strategy that draws on Islamic practice — dhikr (remembrance of Allah), wudu, or salah — as one option among several, never as the only focus.', 900);
+  const raw = await callAI(prompt, 'You are a recovery coach. Be specific, compassionate, and data-driven. Respond with compact JSON only. The user is Muslim. In the copingStrategies, you may include one strategy that draws on Islamic practice — dhikr (remembrance of Allah), wudu, or salah — as one option among several, never as the only focus. If DIARY ENTRIES are provided, use them as the primary source for specific risk factors and coping strategies — extract named triggers (e.g. specific apps, situations, times) over generic ones, and surface coping moves the user actually mentions worked (e.g. "an Islamic reel saved me"). Do not quote large passages.', 900);
   const result = parseJSON<PatternsResponse>(raw);
 
   return NextResponse.json(result);

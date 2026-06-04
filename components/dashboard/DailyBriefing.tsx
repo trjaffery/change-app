@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { getActiveDateString } from '@/lib/dates';
+import Markdown from '@/components/coach/Markdown';
 
 export default function DailyBriefing() {
   const [briefing, setBriefing] = useState<string | null>(null);
@@ -65,7 +66,9 @@ export default function DailyBriefing() {
             <button className="briefing-retry" onClick={generate}>↺ Retry</button>
           </>
         ) : (
-          <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text-secondary)', margin: 0 }}>{briefing}</p>
+          <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text-secondary)' }}>
+            <Markdown text={briefing ?? ''} />
+          </div>
         )}
       </div>
     </>

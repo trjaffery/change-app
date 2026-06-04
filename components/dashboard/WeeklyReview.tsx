@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Markdown from '@/components/coach/Markdown';
 
 interface ReviewData { summary: string; wins: string[]; improvements: string[]; plan: string[] }
 
@@ -28,7 +29,9 @@ export default function WeeklyReview() {
 
       {data && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text-secondary)', margin: 0 }}>{data.summary}</p>
+          <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text-secondary)' }}>
+            <Markdown text={data.summary} />
+          </div>
 
           {[
             { label: '✓ Wins', items: data.wins, color: 'var(--success)', bg: 'rgba(107,227,164,0.06)', border: 'rgba(107,227,164,0.15)' },
@@ -41,7 +44,9 @@ export default function WeeklyReview() {
                 {section.items.map((item, i) => (
                   <li key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, display: 'flex', gap: 8 }}>
                     <span style={{ color: section.color, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>–</span>
-                    {item}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Markdown text={item} />
+                    </div>
                   </li>
                 ))}
               </ul>
