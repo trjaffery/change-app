@@ -133,24 +133,32 @@ export default function ChatThread() {
   return (
     <>
       <style>{`
+        /* Chat fills the available viewport space:
+           - Desktop: subtract the page title (~80px) and a small bottom margin.
+           - Mobile: also subtract the bottom tab nav + the iPhone home-indicator
+             safe area so the input bar lands above them, not behind. */
         .chat-wrap {
           display: flex; flex-direction: column;
-          height: calc(100vh - 80px);
+          height: calc(100dvh - 120px);
           max-height: 900px;
         }
-        .chat-header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding-bottom: 14px; margin-bottom: 14px;
-          border-bottom: 1px solid rgba(255,255,255,0.05);
+        @media (max-width: 640px) {
+          .chat-wrap {
+            height: calc(100dvh - 110px - var(--nav-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+          }
         }
-        .chat-title { font-size: 11px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-tertiary); }
+        /* Floating Clear button — anchored top-right of the chat area, not a row. */
         .chat-clear {
+          position: absolute; top: 0; right: 0;
           background: transparent; border: 1px solid rgba(255,255,255,0.08);
           color: var(--text-tertiary); font-size: 11px; padding: 5px 11px;
           border-radius: 7px; cursor: pointer; font-family: var(--font-mono);
           transition: color 0.15s, background 0.15s;
+          z-index: 2;
+          -webkit-tap-highlight-color: transparent;
         }
         .chat-clear:hover { color: var(--text-secondary); background: rgba(255,255,255,0.04); }
+        .chat-wrap { position: relative; }
         .chat-list {
           flex: 1; overflow-y: auto; padding-right: 4px;
           display: flex; flex-direction: column; gap: 14px;
@@ -166,7 +174,7 @@ export default function ChatThread() {
         @keyframes chatBlink { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); } 40% { opacity: 1; transform: scale(1); } }
         .chat-empty {
           flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-          gap: 16px; text-align: center; color: var(--text-tertiary); padding: 40px 16px;
+          gap: 14px; text-align: center; color: var(--text-tertiary); padding: 18px 8px;
         }
         .chat-empty-heading { font-size: 14px; color: var(--text-secondary); max-width: 360px; line-height: 1.55; }
         .chat-examples { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 480px; }
@@ -210,13 +218,9 @@ export default function ChatThread() {
       `}</style>
 
       <div className="chat-wrap">
-        <div className="chat-header">
-          <div className="chat-title">Coach</div>
-          {messages.length > 0 && (
-            <button className="chat-clear" onClick={clearAll}>Clear</button>
-          )}
-        </div>
-
+        {messages.length > 0 && (
+          <button className="chat-clear" onClick={clearAll}>Clear</button>
+        )}
         <div className="chat-list" ref={listRef}>
           {messages.length === 0 ? (
             <div className="chat-empty">

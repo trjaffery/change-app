@@ -167,3 +167,13 @@ CREATE TABLE IF NOT EXISTS finance_activity (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS finance_activity_created_idx ON finance_activity(created_at DESC);
+
+-- Diary (one freeform entry per day; mood 1-5 optional)
+CREATE TABLE IF NOT EXISTS diary_entries (
+  date DATE PRIMARY KEY,
+  body TEXT NOT NULL DEFAULT '',
+  mood INTEGER CHECK (mood BETWEEN 1 AND 5),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS diary_entries_date_idx ON diary_entries(date DESC);

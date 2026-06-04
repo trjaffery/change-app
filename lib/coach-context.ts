@@ -21,6 +21,7 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     splitsRes, settingsRes, urgesRes, recentUrgeNotesRes,
     goalsTodayRes, goalsWeekRes,
     sessionsRes, relapsesRes, nwHistoryRes,
+    diaryWeekRes,
   ] = await Promise.all([
     sb.from('habits').select('id, name, goal_value, goal_period, schedule_type, schedule_days').is('archived_at', null),
     sb.from('habit_completions').select('habit_id, count').eq('date', todayStr),
@@ -34,6 +35,7 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     sb.from('gym_sessions').select('date, duration_seconds, split_days(name)').gte('date', sevenAgo).lte('date', todayStr),
     sb.from('recovery_relapses').select('created_at, note').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
     sb.from('finance_nw_history').select('total, snapshot_date').gte('snapshot_date', sevenAgo).lte('snapshot_date', todayStr).order('snapshot_date'),
+    sb.from('diary_entries').select('date, body, mood').gte('date', sevenAgo).lte('date', todayStr).order('date', { ascending: false }),
   ]);
 
   const habits = habitsRes.data ?? [];
@@ -154,6 +156,19 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     ? 'No net worth snapshots in the last 7 days.'
     : `Net worth this week: ${nwChange >= 0 ? '+' : '−'}$${Math.abs(Math.round(nwChange)).toLocaleString()} change.`;
 
+  // Last 7 days of diary entries — verbatim, newest first. The coach can use
+  // these for sentiment/context (how the user actually felt) on top of the
+  // numbers. Mood is 1-5 (1=rough, 5=great).
+  const diaryWeek = (diaryWeekRes.data ?? []).filter(d => (d.body as string)?.trim());
+  const diaryLines = diaryWeek.length === 0
+    ? '  (no diary entries in the last 7 days)'
+    : diaryWeek.map(d => {
+        const moodStr = d.mood ? ` [mood ${d.mood}/5]` : '';
+        // Indent body so it visually nests under the date header
+        const indented = (d.body as string).trim().split('\n').map(l => `    ${l}`).join('\n');
+        return `  ${d.date}${moodStr}\n${indented}`;
+      }).join('\n\n');
+
   // 30-day patterns.
   const correlations = await correlationsPromise;
   const patternLines = correlations.length === 0
@@ -194,6 +209,9 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     ``,
     `[30-DAY CROSS-DOMAIN PATTERNS]`,
     patternLines,
+    ``,
+    `[DIARY — LAST 7 DAYS, NEWEST FIRST]`,
+    diaryLines,
     ``,
     recentUrgeNotes.length ? `[RECENT URGE NOTES — most recent first]\n${recentUrgeNotes.join('\n')}\n` : '',
     `=== END SNAPSHOT ===`,

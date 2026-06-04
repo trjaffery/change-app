@@ -21,7 +21,8 @@ export async function POST() {
   const correlationsPromise = computeCorrelations(sb);
 
   const sevenAgoIso = new Date(Date.now() - 7 * 86400000).toISOString();
-  const [habitsRes, todayCompRes, yesterdayCompRes, splitsRes, settingsRes, urgesRes, goalsRes, relapsesRes] = await Promise.all([
+  const sevenAgoDate = toDateStr(new Date(Date.now() - 7 * 86400000));
+  const [habitsRes, todayCompRes, yesterdayCompRes, splitsRes, settingsRes, urgesRes, goalsRes, relapsesRes, diaryRes] = await Promise.all([
     sb.from('habits').select('id, name, goal_value, goal_period, schedule_type, schedule_days, schedule_count').is('archived_at', null),
     sb.from('habit_completions').select('habit_id, count').eq('date', today),
     sb.from('habit_completions').select('habit_id, count').eq('date', yesterday),
@@ -30,6 +31,7 @@ export async function POST() {
     sb.from('recovery_urges').select('intensity, note, created_at').order('created_at', { ascending: false }).limit(3),
     sb.from('goals').select('text, done').eq('date', today),
     sb.from('recovery_relapses').select('created_at, note').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
+    sb.from('diary_entries').select('date, body, mood').gte('date', sevenAgoDate).lte('date', today).order('date', { ascending: false }).limit(7),
   ]);
 
   const allHabits = habitsRes.data ?? [];
@@ -85,6 +87,16 @@ export async function POST() {
   const correlations = await correlationsPromise;
   const topCorrelation = correlations.find(c => c.confidence === 'high') ?? correlations[0];
 
+  // Recent diary entries — verbatim, newest first. Lets the briefing reference
+  // how the user actually felt yesterday rather than only the numbers.
+  const diaryEntries = (diaryRes.data ?? []).filter((d): d is { date: string; body: string; mood: number | null } => !!(d.body as string)?.trim());
+  const diaryBlock = diaryEntries.length > 0
+    ? `Recent diary (newest first):\n${diaryEntries.map(d => {
+        const m = d.mood ? ` [mood ${d.mood}/5]` : '';
+        return `  ${d.date}${m}: "${d.body.trim().replace(/\s+/g, ' ').slice(0, 360)}${d.body.length > 360 ? '…' : ''}"`;
+      }).join('\n')}`
+    : '';
+
   const context = [
     `Today: ${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`,
     habits.length > 0 ? `Habits scheduled today: ${habitsDoneToday}/${habits.length} done so far; yesterday ${yesterdayDone}/${allHabits.length} completed` : 'No habits scheduled today',
@@ -94,11 +106,12 @@ export async function POST() {
     lastRelapse ? `Relapse logged ${daysSinceRelapse === 0 ? 'today' : `${daysSinceRelapse} day${daysSinceRelapse === 1 ? '' : 's'} ago`}${lastRelapse.note ? ` — "${lastRelapse.note}"` : ''}` : '',
     urges.length > 0 ? `Recent urges: ${urges.length} logged, avg intensity ${(urges.reduce((s, u) => s + u.intensity, 0) / urges.length).toFixed(1)}/5. ${recentUrgeNote}` : 'No recent urges logged',
     topCorrelation ? `Pattern in their last 30 days: ${topCorrelation.finding}` : '',
+    diaryBlock,
   ].filter(Boolean).join('\n');
 
   const briefing = await callAI(
     context,
-    'You are a personal coach writing a morning briefing for your client. Use ONLY numbers shown in the data block — never state X/Y where X > Y, never invent figures. Be warm, specific, and motivating without being preachy. Write 3–4 sentences. Reference their actual numbers — pick one or two of: today\'s goals, scheduled habits, the workout/lifts, the streak, or relapse if applicable. If a "Pattern in their last 30 days" line is provided, you may weave it in to make today\'s intention concrete (e.g. nudge toward a workout if it links to fewer urges) — state it as an observed association, never as proven cause, and only if it fits naturally. End with one concrete intention for today. If a recent relapse is listed, gently acknowledge it and frame today as a fresh start without dwelling. The user is Muslim. Where it flows naturally, weave in a brief Islamic reference — alhamdulillah, in sha Allah, or sabr/istiqama. At most one reference, never forced.',
+    'You are a personal coach writing a morning briefing for your client. Use ONLY numbers shown in the data block — never state X/Y where X > Y, never invent figures. Be warm, specific, and motivating without being preachy. Write 3–4 sentences. Reference their actual numbers — pick one or two of: today\'s goals, scheduled habits, the workout/lifts, the streak, or relapse if applicable. If a "Pattern in their last 30 days" line is provided, you may weave it in to make today\'s intention concrete (e.g. nudge toward a workout if it links to fewer urges) — state it as an observed association, never as proven cause, and only if it fits naturally. If a "Recent diary" block is provided, you may pick up on something they wrote (a feeling, a worry, a small win) — do not quote large passages, just briefly reflect it back. End with one concrete intention for today. If a recent relapse is listed, gently acknowledge it and frame today as a fresh start without dwelling. The user is Muslim. Where it flows naturally, weave in a brief Islamic reference — alhamdulillah, in sha Allah, or sabr/istiqama. At most one reference, never forced.',
     300,
   );
 

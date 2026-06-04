@@ -5,21 +5,49 @@ interface Urge { id: string; intensity: number; note: string; triggers: string[]
 
 const TRIGGERS = ['Stress', 'Boredom', 'Social', 'Physical', 'Emotional'];
 
+const INITIAL_PAGE = 10;
+const NEXT_PAGE = 20;
+
 export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void }) {
   const [urges, setUrges] = useState<Urge[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [intensity, setIntensity] = useState(3);
   const [note, setNote] = useState('');
   const [triggers, setTriggers] = useState<Set<string>>(new Set());
 
-  const fetchUrges = useCallback(async () => {
-    const res = await fetch('/api/recovery/urges');
-    setUrges(await res.json());
+  // Reload the list from the top — used after log/delete and on initial mount.
+  // We refetch enough rows to cover whatever the user had already expanded to,
+  // rounded up to the next page size, so the visible list doesn't shrink.
+  const fetchUrges = useCallback(async (preserveLen?: number) => {
+    const desired = Math.max(INITIAL_PAGE, preserveLen ?? 0);
+    const res = await fetch(`/api/recovery/urges?limit=${desired}&offset=0`);
+    const data = (await res.json()) as Urge[];
+    setUrges(Array.isArray(data) ? data : []);
+    const totalHeader = res.headers.get('X-Total-Count');
+    setTotal(totalHeader ? Number(totalHeader) : (Array.isArray(data) ? data.length : 0));
   }, []);
 
   useEffect(() => { fetchUrges(); }, [fetchUrges]);
 
   function toggleTrigger(t: string) {
     setTriggers(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  }
+
+  async function loadMore() {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`/api/recovery/urges?limit=${NEXT_PAGE}&offset=${urges.length}`);
+      const more = (await res.json()) as Urge[];
+      if (Array.isArray(more) && more.length) {
+        setUrges(prev => [...prev, ...more]);
+      }
+      const totalHeader = res.headers.get('X-Total-Count');
+      if (totalHeader) setTotal(Number(totalHeader));
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function logUrge() {
@@ -29,12 +57,12 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
       body: JSON.stringify({ intensity, note, triggers: [...triggers] }),
     });
     setNote(''); setIntensity(3); setTriggers(new Set());
-    fetchUrges(); onUrgeLogged?.();
+    fetchUrges(urges.length + 1); onUrgeLogged?.();
   }
 
   async function deleteUrge(id: string) {
     await fetch(`/api/recovery/urges/${id}`, { method: 'DELETE' });
-    fetchUrges(); onUrgeLogged?.();
+    fetchUrges(urges.length); onUrgeLogged?.();
   }
 
   return (
@@ -70,7 +98,14 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
           <input className="text-input" type="text" placeholder="Optional note…" style={{ width: '100%' }} value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => e.key === 'Enter' && logUrge()} />
           <div><button className="btn-primary" style={{ padding: '10px 18px', fontSize: 13 }} onClick={logUrge}>Log Urge</button></div>
         </div>
-        {urges.slice(0, 10).map(u => {
+
+        {urges.length > 0 && (
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.06em', marginBottom: 8 }}>
+            Showing {urges.length} of {total} logged
+          </div>
+        )}
+
+        {urges.map(u => {
           const d = new Date(u.created_at);
           const ts = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
           return (
@@ -92,6 +127,30 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
           );
         })}
         {urges.length === 0 && <div className="empty-state">No urges logged yet.</div>}
+
+        {urges.length > 0 && urges.length < total && (
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            style={{
+              marginTop: 8, width: '100%',
+              padding: '9px 12px',
+              border: '1px dashed rgba(255,255,255,0.12)',
+              borderRadius: 10,
+              background: 'transparent',
+              color: 'var(--text-tertiary)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              cursor: loadingMore ? 'default' : 'pointer',
+              transition: 'color 160ms ease, border-color 160ms ease',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            {loadingMore ? 'Loading…' : `Load ${Math.min(NEXT_PAGE, total - urges.length)} more`}
+          </button>
+        )}
       </div>
     </>
   );

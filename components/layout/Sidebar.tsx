@@ -15,6 +15,7 @@ import { usePathname } from 'next/navigation';
 
 const NAV = [
   { href: '/',         icon: '⊙', label: 'Home' },
+  { href: '/diary',    icon: '✎', label: 'Diary' },
   { href: '/gym',      icon: '◎', label: 'Gym' },
   { href: '/recovery', icon: '◈', label: 'Recovery' },
   { href: '/finance',  icon: '◇', label: 'Finance' },

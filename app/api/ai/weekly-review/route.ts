@@ -17,7 +17,7 @@ export async function POST() {
   const sevenAgo = toDateStr(new Date(Date.now() - 7 * 86400000));
 
   const sevenAgoIso = new Date(Date.now() - 7 * 86400000).toISOString();
-  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, settingsRes, nwHistoryRes, subsRes, relapsesRes, goalsRes] = await Promise.all([
+  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, settingsRes, nwHistoryRes, subsRes, relapsesRes, goalsRes, diaryRes] = await Promise.all([
     sb.from('habits').select('id, name, goal_value, goal_period').is('archived_at', null),
     sb.from('habit_completions').select('habit_id, date, count').gte('date', sevenAgo).lte('date', today),
     sb.from('gym_sessions').select('date, duration_seconds, split_days(name)').gte('date', sevenAgo).lte('date', today),
@@ -28,6 +28,7 @@ export async function POST() {
     sb.from('finance_subscriptions').select('amount, billing_cycle'),
     sb.from('recovery_relapses').select('created_at, note').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
     sb.from('goals').select('date, done').gte('date', sevenAgo).lte('date', today),
+    sb.from('diary_entries').select('date, body, mood').gte('date', sevenAgo).lte('date', today).order('date', { ascending: false }),
   ]);
 
   const habits = habitsRes.data ?? [];
@@ -131,6 +132,17 @@ export async function POST() {
     ? '- No daily goals were set this week'
     : `- Goals set on ${goalsSetDays}/7 days\n- ${goalsDone}/${totalGoals} completed${goalCompletionPct !== null ? ` (${goalCompletionPct}%)` : ''}`;
 
+  // Diary entries — first-person reflections give the model qualitative texture
+  // alongside the quantitative stats. Trim each entry to keep token cost bounded.
+  const diaryEntries = (diaryRes.data ?? []).filter((d): d is { date: string; body: string; mood: number | null } => !!(d.body as string)?.trim());
+  const diaryBlock = diaryEntries.length === 0
+    ? ''
+    : `\nDIARY ENTRIES THIS WEEK (newest first; mood 1=rough, 5=great):\n` + diaryEntries.map(d => {
+        const m = d.mood ? ` [mood ${d.mood}/5]` : '';
+        const trimmed = d.body.trim().replace(/\s+/g, ' ').slice(0, 480);
+        return `- ${d.date}${m}: "${trimmed}${d.body.length > 480 ? '…' : ''}"`;
+      }).join('\n');
+
   const prompt = `Weekly review data (last 7 days). Every number below is verified ground truth — cite exactly, never inflate, never state X/Y where X > Y, never invent stats not shown here.
 
 HABITS (${habits.length} total):
@@ -153,12 +165,14 @@ ${relapses.length > 0 ? `- RELAPSES THIS WEEK: ${relapses.length} — ${relapseL
 FINANCE:
 - Net worth change this week: ${nwChange !== null ? `${nwChange >= 0 ? '+' : '−'}$${Math.abs(Math.round(nwChange)).toLocaleString()}` : 'no data'}
 - Monthly subscriptions: $${monthlyBurn.toFixed(0)}/mo
-${patternBlock}
+${patternBlock}${diaryBlock}
 
 Return JSON with this exact shape:
 {"summary":"2-3 sentence overall summary of the week","wins":["2-3 specific wins based on their data"],"improvements":["2-3 specific areas to improve"],"plan":["3-4 concrete action items for next week based on the data"]}
 
-If CROSS-DOMAIN PATTERNS are listed above, reference the meaningful ones as a win or plan item — phrase them as observed associations (not proven cause) and use the exact numbers given. Do NOT invent any correlation that is not in that list.`;
+If CROSS-DOMAIN PATTERNS are listed above, reference the meaningful ones as a win or plan item — phrase them as observed associations (not proven cause) and use the exact numbers given. Do NOT invent any correlation that is not in that list.
+
+If DIARY ENTRIES are listed above, use them as qualitative context for the wins/improvements/plan — e.g. if multiple entries mention poor sleep, surface that as an improvement with a concrete plan. Do not quote large passages. Reflect the user's own language briefly rather than restating it.`;
 
   const raw = await callAI(prompt, 'You are a personal coach giving a weekly review. Hard rules: (1) Use ONLY numbers shown in the data block. Never state X/Y where X > Y. Never compute new ratios or invent figures. If a habit reads "hit goal 5/7 days", you cannot say "5 out of 8" or "6/7". (2) Every win, improvement, and plan item must reference a specific number from the data AND suggest a concrete action — not vague encouragement. (3) BANNED filler phrases (use specifics instead): "great foundation", "spiritual anchor", "commendable", "keep nurturing", "small consistent steps", "wonderful work", "amazing job", "renewed focus". (4) When goals were set on 0/7 days, don\'t say "0/0 completed needs attention" — say plainly they weren\'t set and suggest one starter goal. (5) If there were relapses this week, address them first in the summary with compassion and grace — never gloss over them, but frame the rest of the week as resilience and a chance to learn. Respond with compact JSON only — no markdown. The user is Muslim. Where it feels genuine, reference Islamic values once — gratitude (alhamdulillah), reflecting on blessings, sabr. Subtle and restrained, never preachy.', 2000);
   const result = parseJSON<ReviewResponse>(raw);
