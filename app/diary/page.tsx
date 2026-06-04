@@ -1,29 +1,21 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getActiveDateString, formatDate, toDateString } from '@/lib/dates';
+import SavedLabel from '@/components/diary/SavedLabel';
+import DiaryHeader from '@/components/diary/DiaryHeader';
+import MoodChart from '@/components/diary/MoodChart';
+import PastEntries from '@/components/diary/PastEntries';
 
 interface Entry { date: string; body: string; mood: number | null; updated_at: string }
 
-const INITIAL_PAST = 10;
+const INITIAL_PAST = 30; // pull enough at first to power the 30-day mood chart + 60-day heatmap
 const NEXT_PAGE = 20;
-const MOOD_TONES = ['#FF6B6B', '#E07658', '#F2C063', '#9BD56F', '#6BE3A4']; // 1..5: red→amber→green
+const MOOD_TONES = ['#FF6B6B', '#E07658', '#F2C063', '#9BD56F', '#6BE3A4'];
 
 function shiftDate(dateStr: string, deltaDays: number): string {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + deltaDays);
   return toDateString(d);
-}
-
-function relativeSeconds(iso: string): string {
-  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
-  const s = Math.floor(diff / 1000);
-  if (s < 5) return 'just now';
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 export default function DiaryPage() {
@@ -32,17 +24,16 @@ export default function DiaryPage() {
   const [body, setBody] = useState('');
   const [mood, setMood] = useState<number | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState<'idle' | 'saving'>('idle');
-  const [tick, setTick] = useState(0); // forces "X seconds ago" re-render
+  const [saving, setSaving] = useState(false);
   const [past, setPast] = useState<Entry[]>([]);
   const [pastTotal, setPastTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirtyRef = useRef(false);
+  const autosizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialLoadRef = useRef(true);
 
-  // Load entry whenever activeDate changes.
+  // Load a single entry for the given date.
   const loadEntry = useCallback(async (date: string) => {
     initialLoadRef.current = true;
     const res = await fetch(`/api/diary/${date}`);
@@ -50,41 +41,71 @@ export default function DiaryPage() {
     setBody(data?.body ?? '');
     setMood(data?.mood ?? null);
     setSavedAt(data?.updated_at ?? null);
-    dirtyRef.current = false;
-    // After microtask so the textarea has the new content before we autosize.
-    setTimeout(() => autosizeTextarea(), 0);
+    // Autosize once after the new content lands. Done as a one-off here; the
+    // typing path uses a grow-only debounced version below.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = 'auto';
+      el.style.height = `${Math.max(240, el.scrollHeight)}px`;
+    });
   }, []);
-
   useEffect(() => { loadEntry(activeDate); }, [activeDate, loadEntry]);
 
-  // Past entries list.
-  const loadPast = useCallback(async (size = INITIAL_PAST) => {
+  // Past entries — fetched ONCE on mount and after explicit "Load more".
+  // We do NOT refetch on save anymore; the freshly-saved entry is merged
+  // optimistically into the local `past` array, which prevents the layout
+  // shift that was causing iOS Safari to scroll-to-top mid-typing.
+  const loadPast = useCallback(async (size: number) => {
     const res = await fetch(`/api/diary?limit=${size}&offset=0`);
     const data = (await res.json()) as Entry[];
     setPast(Array.isArray(data) ? data : []);
     const total = res.headers.get('X-Total-Count');
     setPastTotal(total ? Number(total) : 0);
   }, []);
-  useEffect(() => { loadPast(); }, [loadPast]);
+  useEffect(() => { loadPast(INITIAL_PAST); }, [loadPast]);
 
-  // "Saved Xs ago" ticker.
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 10000);
-    return () => clearInterval(id);
-  }, []);
+  // Merge a freshly-saved entry into local state without refetching.
+  function mergeSavedEntry(saved: Entry) {
+    setPast(prev => {
+      const existing = prev.findIndex(e => e.date === saved.date);
+      if (existing >= 0) {
+        const next = [...prev];
+        next[existing] = saved;
+        return next;
+      }
+      // New entry — insert in date order (newest first).
+      const next = [...prev, saved].sort((a, b) => b.date.localeCompare(a.date));
+      return next;
+    });
+    setPastTotal(prev => {
+      // If we just added a brand-new date, bump the total.
+      const inList = past.find(e => e.date === saved.date);
+      return inList ? prev : prev + 1;
+    });
+  }
 
-  function autosizeTextarea() {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.max(240, el.scrollHeight)}px`;
+  // Grow-only autosize, debounced so it doesn't fire on every keystroke.
+  // Skipping the `height: 'auto'` collapse step keeps the textarea from
+  // visually wobbling mid-type — the page just grows downward as needed.
+  function scheduleAutosize() {
+    if (autosizeTimerRef.current) clearTimeout(autosizeTimerRef.current);
+    autosizeTimerRef.current = setTimeout(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      // Grow-only: if current pixel height already covers scrollHeight, do nothing.
+      const current = el.offsetHeight;
+      if (el.scrollHeight > current) {
+        el.style.height = `${el.scrollHeight}px`;
+      }
+    }, 120);
   }
 
   // Debounced save — 1500ms after the user stops typing.
   const scheduleSave = useCallback((nextBody: string, nextMood: number | null) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
-      setStatus('saving');
+      setSaving(true);
       try {
         const res = await fetch(`/api/diary/${activeDate}`, {
           method: 'PUT',
@@ -93,27 +114,24 @@ export default function DiaryPage() {
         });
         const data = (await res.json()) as Entry;
         setSavedAt(data.updated_at);
-        dirtyRef.current = false;
-        // Refresh history list so today's entry preview stays current.
-        loadPast(Math.max(INITIAL_PAST, past.length));
+        mergeSavedEntry(data);
       } finally {
-        setStatus('idle');
+        setSaving(false);
       }
     }, 1500);
-  }, [activeDate, loadPast, past.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDate]);
 
   function onBodyChange(v: string) {
     setBody(v);
-    autosizeTextarea();
+    scheduleAutosize();
     if (initialLoadRef.current) { initialLoadRef.current = false; return; }
-    dirtyRef.current = true;
     scheduleSave(v, mood);
   }
 
   function onMoodChange(m: number | null) {
     setMood(m);
     if (initialLoadRef.current) { initialLoadRef.current = false; return; }
-    dirtyRef.current = true;
     scheduleSave(body, m);
   }
 
@@ -132,11 +150,6 @@ export default function DiaryPage() {
   }
 
   const isToday = activeDate === today;
-  const isFuture = activeDate > today;
-
-  // Suppress the unused-tick warning by referencing it in render.
-  const savedLabel = savedAt ? `saved ${relativeSeconds(savedAt)}` : 'not yet saved';
-  void tick;
 
   return (
     <>
@@ -216,35 +229,11 @@ export default function DiaryPage() {
           animation: dr-pulse 1.2s ease-in-out infinite;
         }
         @keyframes dr-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-
-        .dr-past-row {
-          display: flex; align-items: center; gap: 12px;
-          padding: 12px 4px;
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-          cursor: pointer;
-          transition: background 140ms ease;
-          -webkit-tap-highlight-color: transparent;
-        }
-        .dr-past-row:hover { background: rgba(255,255,255,0.025); }
-        .dr-past-row.active { background: rgba(107,227,164,0.06); }
-        .dr-past-date {
-          font-family: var(--font-mono); font-size: 11px; font-weight: 600;
-          color: var(--text-secondary);
-          width: 64px; flex-shrink: 0;
-          letter-spacing: 0.04em;
-        }
-        .dr-past-preview {
-          font-size: 13px; color: var(--text-secondary);
-          flex: 1; min-width: 0;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-          line-height: 1.4;
-        }
-        .dr-past-mood {
-          width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-        }
       `}</style>
 
       <h1 className="page-title">Diary</h1>
+
+      <DiaryHeader entries={past} today={today} todayBody={isToday ? body : ''} total={pastTotal} />
 
       {/* Date navigation */}
       <div className="dr-nav">
@@ -259,7 +248,7 @@ export default function DiaryPage() {
         </div>
         <button
           className="dr-arrow"
-          onClick={() => !isFuture && setActiveDate(d => shiftDate(d, 1))}
+          onClick={() => activeDate < today && setActiveDate(d => shiftDate(d, 1))}
           disabled={isToday}
           aria-label="Next day"
         >›</button>
@@ -297,7 +286,6 @@ export default function DiaryPage() {
           })}
         </div>
 
-        {/* Body */}
         <textarea
           ref={textareaRef}
           className="dr-textarea"
@@ -310,65 +298,26 @@ export default function DiaryPage() {
           autoCorrect="on"
         />
 
-        {/* Status */}
         <div className="dr-status">
-          <span>
-            <span className={`dr-status-dot${status === 'saving' ? ' saving' : ''}`} />
-            {status === 'saving' ? 'saving…' : savedLabel}
-          </span>
+          <SavedLabel updatedAt={savedAt} saving={saving} />
           <span>{body.length} chars</span>
         </div>
       </div>
 
-      {/* History */}
-      {past.length > 0 && (
-        <div className="card">
-          <div className="section-title" style={{ marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-            <span>Past entries</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>
-              {past.length} of {pastTotal}
-            </span>
-          </div>
-          {past.map(e => {
-            const isActive = e.date === activeDate;
-            const moodColor = e.mood ? MOOD_TONES[e.mood - 1] : 'rgba(255,255,255,0.12)';
-            const previewText = (e.body || '').replace(/\s+/g, ' ').trim() || '(empty)';
-            return (
-              <div
-                key={e.date}
-                className={`dr-past-row${isActive ? ' active' : ''}`}
-                onClick={() => setActiveDate(e.date)}
-              >
-                <span className="dr-past-date">{formatDate(e.date)}</span>
-                <span className="dr-past-mood" style={{ background: moodColor }} />
-                <span className="dr-past-preview">{previewText}</span>
-              </div>
-            );
-          })}
-          {past.length < pastTotal && (
-            <button
-              onClick={loadMorePast}
-              disabled={loadingMore}
-              style={{
-                marginTop: 10, width: '100%',
-                padding: '9px 12px',
-                border: '1px dashed rgba(255,255,255,0.12)',
-                borderRadius: 10,
-                background: 'transparent',
-                color: 'var(--text-tertiary)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                cursor: loadingMore ? 'default' : 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-            >
-              {loadingMore ? 'Loading…' : `Load ${Math.min(NEXT_PAGE, pastTotal - past.length)} more`}
-            </button>
-          )}
-        </div>
-      )}
+      <MoodChart entries={past} />
+
+      <PastEntries
+        entries={past}
+        total={pastTotal}
+        activeDate={activeDate}
+        today={today}
+        loadingMore={loadingMore}
+        onLoadMore={loadMorePast}
+        onEdit={(date) => {
+          setActiveDate(date);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
     </>
   );
 }

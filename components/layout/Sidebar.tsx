@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { House, NotebookPen, Dumbbell, HeartPulse, Wallet, Brain, type LucideIcon } from 'lucide-react';
 
 /**
  * Hybrid navigation.
@@ -8,18 +9,17 @@ import { usePathname } from 'next/navigation';
  * - Mobile (≤ 640px): bottom tab bar, anchored to the home indicator via
  *   env(safe-area-inset-bottom). Icon + small label, full tap target.
  * - Desktop (> 640px): collapsed rail (icon only) that expands on hover.
- *
- * The icons are intentionally geometric unicode glyphs — they read as
- * deliberate marks rather than generic line icons.
  */
 
-const NAV = [
-  { href: '/',         icon: '⊙', label: 'Home' },
-  { href: '/diary',    icon: '✎', label: 'Diary' },
-  { href: '/gym',      icon: '◎', label: 'Gym' },
-  { href: '/recovery', icon: '◈', label: 'Recovery' },
-  { href: '/finance',  icon: '◇', label: 'Finance' },
-  { href: '/coach',    icon: '✦', label: 'Coach' },
+interface NavItem { href: string; Icon: LucideIcon; label: string }
+
+const NAV: NavItem[] = [
+  { href: '/',         Icon: House,        label: 'Home' },
+  { href: '/diary',    Icon: NotebookPen,  label: 'Diary' },
+  { href: '/gym',      Icon: Dumbbell,     label: 'Gym' },
+  { href: '/recovery', Icon: HeartPulse,   label: 'Recovery' },
+  { href: '/finance',  Icon: Wallet,       label: 'Finance' },
+  { href: '/coach',    Icon: Brain,        label: 'Coach' },
 ];
 
 export default function Sidebar() {
@@ -55,9 +55,9 @@ export default function Sidebar() {
           white-space: nowrap; overflow: hidden;
         }
         .nav-brand-glyph {
-          font-family: var(--font-mono); font-style: normal;
-          color: var(--success); flex-shrink: 0; width: 32px; text-align: center;
-          font-size: 16px;
+          color: var(--success); flex-shrink: 0; width: 32px;
+          display: inline-flex; align-items: center; justify-content: center;
+          line-height: 0;
         }
         .nav-brand-text {
           opacity: 0; transform: translateX(-4px);
@@ -84,9 +84,13 @@ export default function Sidebar() {
           box-shadow: 0 0 12px rgba(107,227,164,0.6);
         }
         .nav-glyph {
-          font-family: var(--font-mono);
-          font-size: 17px; flex-shrink: 0; width: 32px; text-align: center;
-          line-height: 1;
+          flex-shrink: 0; width: 32px;
+          display: inline-flex; align-items: center; justify-content: center;
+          line-height: 0;
+        }
+        .nav-item.active .nav-glyph {
+          color: var(--success);
+          filter: drop-shadow(0 0 10px rgba(107,227,164,0.5));
         }
         .nav-label {
           font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
@@ -126,7 +130,7 @@ export default function Sidebar() {
           .nav-tab.active { color: var(--text-primary); }
           .nav-tab.active .nav-tab-glyph {
             color: var(--success);
-            text-shadow: 0 0 12px rgba(107,227,164,0.5);
+            filter: drop-shadow(0 0 10px rgba(107,227,164,0.5));
           }
           /* Active indicator pip at the top of the tab */
           .nav-tab.active::before {
@@ -138,9 +142,9 @@ export default function Sidebar() {
             box-shadow: 0 0 10px rgba(107,227,164,0.55);
           }
           .nav-tab-glyph {
-            font-family: var(--font-mono);
-            font-size: 20px; line-height: 1;
-            transition: color 160ms ease, text-shadow 160ms ease, transform 160ms ease;
+            display: inline-flex; align-items: center; justify-content: center;
+            line-height: 0;
+            transition: color 160ms ease, filter 160ms ease, transform 160ms ease;
           }
           .nav-tab:active .nav-tab-glyph { transform: scale(0.92); }
           .nav-tab-label {
@@ -153,18 +157,18 @@ export default function Sidebar() {
       {/* Desktop */}
       <nav className="nav nav-desktop" aria-label="Primary">
         <div className="nav-brand">
-          <span className="nav-brand-glyph">◈</span>
+          <span className="nav-brand-glyph"><HeartPulse size={18} strokeWidth={1.75} /></span>
           <span className="nav-brand-text">Change</span>
         </div>
         <div className="nav-list">
-          {NAV.map(({ href, icon, label }) => (
+          {NAV.map(({ href, Icon, label }) => (
             <Link
               key={href}
               href={href}
               className={`nav-item${path === href ? ' active' : ''}`}
               aria-current={path === href ? 'page' : undefined}
             >
-              <span className="nav-glyph">{icon}</span>
+              <span className="nav-glyph"><Icon size={20} strokeWidth={1.75} /></span>
               <span className="nav-label">{label}</span>
             </Link>
           ))}
@@ -174,14 +178,14 @@ export default function Sidebar() {
       {/* Mobile */}
       <nav className="nav nav-mobile" aria-label="Primary">
         <div className="nav-mobile-list">
-          {NAV.map(({ href, icon, label }) => (
+          {NAV.map(({ href, Icon, label }) => (
             <Link
               key={href}
               href={href}
               className={`nav-tab${path === href ? ' active' : ''}`}
               aria-current={path === href ? 'page' : undefined}
             >
-              <span className="nav-tab-glyph">{icon}</span>
+              <span className="nav-tab-glyph"><Icon size={22} strokeWidth={1.75} /></span>
               <span className="nav-tab-label">{label}</span>
             </Link>
           ))}

@@ -3,6 +3,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import EmptyState from '@/components/layout/EmptyState';
 import ActivityLog from '@/components/finance/ActivityLog';
+import {
+  Landmark, TrendingUp, Bitcoin, Boxes,
+  UtensilsCrossed, ShoppingBasket, ShoppingBag, Plane, Car, Tv,
+  HeartPulse, Receipt, Code2, Sparkles, CircleDashed,
+  Pencil, Trash2, RotateCw,
+  type LucideIcon,
+} from 'lucide-react';
 
 function cacheSet(key: string, data: unknown, ttlMs: number) {
   try {
@@ -125,25 +132,26 @@ function txCat(tx: { name: string; merchant_name: string | null; category: strin
   return tx.category?.[0] ?? 'Other';
 }
 
-function getCatEmoji(cat: string): string {
+function getCatIcon(cat: string): LucideIcon {
   const c = cat.toLowerCase();
-  if (/food|drink|restaurant|dining|grocer/.test(c)) return '🍔';
-  if (/shop|retail|clothing|merchandise/.test(c)) return '🛍️';
-  if (/travel|airline|hotel|flight/.test(c)) return '✈️';
-  if (/transport|uber|lyft|transit|parking|gas|fuel|auto/.test(c)) return '🚗';
-  if (/entertain|recreation|movie|game/.test(c)) return '🎮';
-  if (/health|medical|pharmacy|doctor|dental|fitness|gym/.test(c)) return '🏥';
-  if (/bill|utilit|phone|internet|cable/.test(c)) return '🏠';
-  if (/software|subscription|saas|cloud/.test(c)) return '💻';
-  if (/personal care|beauty|salon|spa/.test(c)) return '💅';
-  return '💳';
+  if (/grocer/.test(c)) return ShoppingBasket;
+  if (/food|drink|restaurant|dining/.test(c)) return UtensilsCrossed;
+  if (/shop|retail|clothing|merchandise/.test(c)) return ShoppingBag;
+  if (/travel|airline|hotel|flight/.test(c)) return Plane;
+  if (/transport|uber|lyft|transit|parking|gas|fuel|auto/.test(c)) return Car;
+  if (/entertain|recreation|movie|game/.test(c)) return Tv;
+  if (/health|medical|pharmacy|doctor|dental|fitness|gym/.test(c)) return HeartPulse;
+  if (/bill|utilit|phone|internet|cable/.test(c)) return Receipt;
+  if (/software|subscription|saas|cloud/.test(c)) return Code2;
+  if (/personal care|beauty|salon|spa/.test(c)) return Sparkles;
+  return CircleDashed;
 }
 
-const CATEGORY_META: Record<Category, { label: string; color: string; icon: string }> = {
-  bank:    { label: 'Bank',    color: '#6BE3A4', icon: '◉' },
-  stocks:  { label: 'Stocks',  color: '#78B4FF', icon: '◈' },
-  crypto:  { label: 'Crypto',  color: '#F2C063', icon: '◆' },
-  other:   { label: 'Other',   color: '#B8B6B0', icon: '◎' },
+const CATEGORY_META: Record<Category, { label: string; color: string; Icon: LucideIcon }> = {
+  bank:    { label: 'Bank',    color: '#6BE3A4', Icon: Landmark },
+  stocks:  { label: 'Stocks',  color: '#78B4FF', Icon: TrendingUp },
+  crypto:  { label: 'Crypto',  color: '#F2C063', Icon: Bitcoin },
+  other:   { label: 'Other',   color: '#B8B6B0', Icon: Boxes },
 };
 
 function fmt(n: number) {
@@ -914,7 +922,7 @@ export default function FinancePage() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>Savings Rate</div>
                   {!editingIncome && (
-                    <button className="icon-btn" style={{ fontSize: 12 }} onClick={() => { setEditingIncome(true); setIncomeInput(monthlyIncome > 0 ? String(monthlyIncome) : ''); }}>✎</button>
+                    <button className="icon-btn" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center' }} onClick={() => { setEditingIncome(true); setIncomeInput(monthlyIncome > 0 ? String(monthlyIncome) : ''); }} aria-label="Edit income"><Pencil size={13} strokeWidth={1.75} /></button>
                   )}
                 </div>
                 {editingIncome ? (
@@ -992,11 +1000,14 @@ export default function FinancePage() {
                   : plaidAccounts.reduce((s, a) => s + (a.balances.current ?? 0), 0);
                 const catTotal = catItems.reduce((s, i) => s + i.value, 0) + plaidBankNet;
                 const meta = CATEGORY_META[cat];
+                const MetaIcon = meta.Icon;
                 return (
                   <div key={cat} className="cat-section">
                     <div className="cat-header">
                       <div className="cat-label">
-                        <span style={{ color: meta.color }}>{meta.icon}</span>
+                        <span style={{ color: meta.color, display: 'inline-flex', alignItems: 'center' }}>
+                          <MetaIcon size={14} strokeWidth={1.75} />
+                        </span>
                         <span style={{ color: meta.color }}>{meta.label}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1029,8 +1040,8 @@ export default function FinancePage() {
                             <span className="finance-row-name">{item.name}</span>
                             <span className="finance-row-value">{fmt(item.value)}</span>
                             <div className="finance-row-actions">
-                              <button className="icon-btn" onClick={() => { setEditId(item.id); setEditName(item.name); setEditValue(String(item.value)); }} title="Edit">✎</button>
-                              <button className="icon-btn danger" onClick={() => deleteItem(item.id)} title="Delete">✕</button>
+                              <button className="icon-btn" onClick={() => { setEditId(item.id); setEditName(item.name); setEditValue(String(item.value)); }} title="Edit" aria-label="Edit"><Pencil size={13} strokeWidth={1.75} /></button>
+                              <button className="icon-btn danger" onClick={() => deleteItem(item.id)} title="Delete" aria-label="Delete"><Trash2 size={13} strokeWidth={1.75} /></button>
                             </div>
                           </>
                         )}
@@ -1158,7 +1169,8 @@ export default function FinancePage() {
                         onClick={() => syncAccount(conn.item_id)}
                         disabled={syncingIds.has(conn.item_id)}
                         title="Sync"
-                      >{syncingIds.has(conn.item_id) ? '…' : '⟳'}</button>
+                        aria-label="Sync account"
+                      >{syncingIds.has(conn.item_id) ? '…' : <RotateCw size={13} strokeWidth={1.75} />}</button>
                       <button className="icon-btn danger" style={{ fontSize: 12 }} onClick={() => disconnectPlaid(conn.item_id)} title="Disconnect">✕</button>
                     </div>
                   ))
@@ -1191,7 +1203,7 @@ export default function FinancePage() {
                 onClick={scanTransactions}
                 disabled={scanLoading}
               >
-                {scanLoading ? 'Scanning…' : '⟳ Scan bank transactions'}
+                {scanLoading ? 'Scanning…' : <><RotateCw size={12} strokeWidth={1.75} style={{ verticalAlign: 'text-bottom', marginRight: 5 }} /> Scan bank transactions</>}
               </button>
             )}
           </div>
@@ -1495,13 +1507,14 @@ export default function FinancePage() {
                   )}
                   {topCats.map(([cat, total]) => {
                     const color = catColorMap.get(cat) ?? CAT_COLORS[0];
-                    const emoji = getCatEmoji(cat);
+                    const CatIcon = getCatIcon(cat);
                     const isActive = txFilter === cat;
                     return (
                       <div key={cat} onClick={() => setTxFilter(isActive ? null : cat)} style={{ cursor: 'pointer', opacity: txFilter && !isActive ? 0.45 : 1, transition: 'opacity 0.15s' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span style={{ fontSize: 12, color: isActive ? color : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400 }}>
-                            {emoji} {cat}
+                          <span style={{ fontSize: 12, color: isActive ? color : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <CatIcon size={13} strokeWidth={1.75} />
+                            {cat}
                           </span>
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>${total.toFixed(0)}</span>
                         </div>
@@ -1526,7 +1539,7 @@ export default function FinancePage() {
                   {byDate.get(date)!.map(tx => {
                     const cat = txCat(tx);
                     const color = catColorMap.get(cat) ?? 'rgba(255,255,255,0.3)';
-                    const emoji = getCatEmoji(cat);
+                    const CatIcon = getCatIcon(cat);
                     const isOpen = expandedTx === tx.transaction_id;
                     const acct = tx.account_id ? accountMap.get(tx.account_id) : undefined;
                     return (
@@ -1539,8 +1552,9 @@ export default function FinancePage() {
                             <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {tx.name}
                             </div>
-                            <div style={{ fontSize: 11, color, marginTop: 1 }}>
-                              {emoji} {cat}{tx.pending ? ' · Pending' : ''}
+                            <div style={{ fontSize: 11, color, marginTop: 1, display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <CatIcon size={11} strokeWidth={1.75} />
+                              {cat}{tx.pending ? ' · Pending' : ''}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 12 }}>

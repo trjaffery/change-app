@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { Flame } from 'lucide-react';
 import { getActiveDateString } from '@/lib/dates';
 
 interface Entry { date: string; weight: number }
@@ -81,8 +82,9 @@ export default function BodyWeightCard() {
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
         <div className="section-title" style={{ margin: 0 }}>Body weight</div>
         {streak > 0 && (
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)' }}>
-            🔥 {streak} day{streak !== 1 ? 's' : ''}
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--success)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Flame size={12} strokeWidth={1.75} />
+            {streak} day{streak !== 1 ? 's' : ''}
           </span>
         )}
       </div>
