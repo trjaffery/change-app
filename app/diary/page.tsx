@@ -31,11 +31,9 @@ export default function DiaryPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const initialLoadRef = useRef(true);
 
   // Load a single entry for the given date.
   const loadEntry = useCallback(async (date: string) => {
-    initialLoadRef.current = true;
     const res = await fetch(`/api/diary/${date}`);
     const data = (await res.json()) as Entry | null;
     setBody(data?.body ?? '');
@@ -125,13 +123,11 @@ export default function DiaryPage() {
   function onBodyChange(v: string) {
     setBody(v);
     scheduleAutosize();
-    if (initialLoadRef.current) { initialLoadRef.current = false; return; }
     scheduleSave(v, mood);
   }
 
   function onMoodChange(m: number | null) {
     setMood(m);
-    if (initialLoadRef.current) { initialLoadRef.current = false; return; }
     scheduleSave(body, m);
   }
 
