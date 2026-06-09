@@ -177,3 +177,27 @@ CREATE TABLE IF NOT EXISTS diary_entries (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS diary_entries_date_idx ON diary_entries(date DESC);
+
+-- Relapse prevention plan (single row, single-user app)
+CREATE TABLE IF NOT EXISTS rp_plan (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  triggers TEXT DEFAULT '',
+  warning_signs TEXT DEFAULT '',
+  replacement_behaviors TEXT DEFAULT '',
+  support_people JSONB DEFAULT '[]'::jsonb,
+  why TEXT DEFAULT '',
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+INSERT INTO rp_plan(id) VALUES(1) ON CONFLICT DO NOTHING;
+
+-- Urge surfing log — each row is one attempted surf (full or partial)
+CREATE TABLE IF NOT EXISTS urge_surfs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  surfed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_seconds INTEGER NOT NULL,
+  full_completion BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS urge_surfs_at_idx ON urge_surfs(surfed_at DESC);
+
+-- HALT state on each urge log entry
+ALTER TABLE recovery_urges ADD COLUMN IF NOT EXISTS halt TEXT[] DEFAULT '{}';

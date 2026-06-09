@@ -190,6 +190,10 @@ function withinDays(dateStr: string, days: number): boolean {
   return Date.now() - new Date(dateStr + 'T12:00:00').getTime() <= days * 86400000;
 }
 
+function daysSinceDate(dateStr: string): number {
+  return Math.floor((Date.now() - new Date(dateStr + 'T12:00:00').getTime()) / 86400000);
+}
+
 function DonutChart({ data, netWorth, centerLabel = 'net worth' }: { data: { label: string; value: number; color: string }[]; netWorth: number; centerLabel?: string }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (total <= 0) return null;
@@ -1461,18 +1465,32 @@ export default function FinancePage() {
         }
         const sortedDates = [...byDate.keys()].sort((a, b) => b.localeCompare(a));
 
-        const RANGES: { value: 7 | 30 | 90 | 365; label: string }[] = [
+        // Hide range pills the connected banks can't actually serve. Plaid+the bank
+        // determine how far back transactions go; offering "1y" when only ~120 days
+        // are available is misleading. Show a pill if the user has at least
+        // (value − 10 days) of history. Pre-fetch state assumes max history so all
+        // pills appear while loading.
+        const txOldestDays = transactions.length === 0
+          ? 365
+          : Math.max(...transactions.map(t => daysSinceDate(t.date)));
+        const ALL_RANGES: { value: 7 | 30 | 90 | 365; label: string }[] = [
           { value: 7, label: '7d' }, { value: 30, label: '30d' }, { value: 90, label: '90d' }, { value: 365, label: '1y' },
         ];
+        const visibleRanges = ALL_RANGES.filter(r => r.value <= txOldestDays + 10);
 
         return (
           <>
             {/* Summary */}
             <div className="card" style={{ marginBottom: 16 }}>
-              {/* Range picker */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+              {/* Range picker — only pills the bank-provided history can fill */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                {visibleRanges.length < ALL_RANGES.length && (
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-tertiary)', letterSpacing: '0.06em' }}>
+                    ~{txOldestDays}d AVAILABLE
+                  </span>
+                )}
                 <div className="cost-toggle">
-                  {RANGES.map(r => (
+                  {visibleRanges.map(r => (
                     <button
                       key={r.value}
                       className={`cost-toggle-btn${txRange === r.value ? ' active' : ''}`}

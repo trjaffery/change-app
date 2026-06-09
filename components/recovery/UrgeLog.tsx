@@ -1,9 +1,15 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 
-interface Urge { id: string; intensity: number; note: string; triggers: string[]; created_at: string }
+interface Urge { id: string; intensity: number; note: string; triggers: string[]; halt?: string[]; created_at: string }
 
 const TRIGGERS = ['Stress', 'Boredom', 'Social', 'Physical', 'Emotional'];
+const HALT_OPTS: { code: string; label: string }[] = [
+  { code: 'H', label: 'Hungry' },
+  { code: 'A', label: 'Angry' },
+  { code: 'L', label: 'Lonely' },
+  { code: 'T', label: 'Tired' },
+];
 
 const INITIAL_PAGE = 10;
 const NEXT_PAGE = 20;
@@ -15,6 +21,7 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
   const [intensity, setIntensity] = useState(3);
   const [note, setNote] = useState('');
   const [triggers, setTriggers] = useState<Set<string>>(new Set());
+  const [halt, setHalt] = useState<Set<string>>(new Set());
 
   // Reload the list from the top — used after log/delete and on initial mount.
   // We refetch enough rows to cover whatever the user had already expanded to,
@@ -32,6 +39,9 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
 
   function toggleTrigger(t: string) {
     setTriggers(prev => { const n = new Set(prev); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  }
+  function toggleHalt(code: string) {
+    setHalt(prev => { const n = new Set(prev); n.has(code) ? n.delete(code) : n.add(code); return n; });
   }
 
   async function loadMore() {
@@ -54,9 +64,9 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
     await fetch('/api/recovery/urges', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ intensity, note, triggers: [...triggers] }),
+      body: JSON.stringify({ intensity, note, triggers: [...triggers], halt: [...halt] }),
     });
-    setNote(''); setIntensity(3); setTriggers(new Set());
+    setNote(''); setIntensity(3); setTriggers(new Set()); setHalt(new Set());
     fetchUrges(urges.length + 1); onUrgeLogged?.();
   }
 
@@ -75,7 +85,7 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
         .urge-slider { flex:1; accent-color:var(--warning); cursor:pointer; }
         .urge-label { font-size:11px; font-weight:600; letter-spacing:0.10em; text-transform:uppercase; color:var(--text-tertiary); flex-shrink:0; min-width:60px; }
       `}</style>
-      <div className="card" style={{ marginBottom: 22 }}>
+      <div className="card" style={{ marginBottom: 22 }} id="urge-log-card">
         <div className="section-title">Log an Urge</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -94,6 +104,21 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
                 transition: 'all 0.15s',
               }}>{t}</button>
             ))}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {HALT_OPTS.map(h => {
+              const on = halt.has(h.code);
+              return (
+                <button key={h.code} onClick={() => toggleHalt(h.code)} style={{
+                  padding: '4px 10px', borderRadius: 20, border: '1px solid',
+                  borderColor: on ? 'rgba(242,192,99,0.5)' : 'rgba(255,255,255,0.1)',
+                  background: on ? 'rgba(242,192,99,0.12)' : 'transparent',
+                  color: on ? '#F2C063' : 'var(--text-tertiary)',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                  transition: 'all 0.15s',
+                }}>{h.label}</button>
+              );
+            })}
           </div>
           <input className="text-input" type="text" placeholder="Optional note…" style={{ width: '100%' }} value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => e.key === 'Enter' && logUrge()} />
           <div><button className="btn-primary" style={{ padding: '10px 18px', fontSize: 13 }} onClick={logUrge}>Log Urge</button></div>
