@@ -138,11 +138,17 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, color: 'var(--warning)', width: 20, flexShrink: 0 }}>{u.intensity}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{u.note || 'No note'}</div>
-                {u.triggers?.length > 0 && (
+                {((u.triggers?.length ?? 0) > 0 || (u.halt?.length ?? 0) > 0) && (
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-                    {u.triggers.map(t => (
-                      <span key={t} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: 'rgba(242,192,99,0.1)', color: '#F2C063', letterSpacing: '0.05em' }}>{t}</span>
+                    {u.triggers?.map(t => (
+                      <span key={`t-${t}`} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: 'rgba(242,192,99,0.1)', color: '#F2C063', letterSpacing: '0.05em' }}>{t}</span>
                     ))}
+                    {u.halt?.map(code => {
+                      const label = HALT_OPTS.find(h => h.code === code)?.label ?? code;
+                      return (
+                        <span key={`h-${code}`} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: 'rgba(242,192,99,0.1)', color: '#F2C063', letterSpacing: '0.05em' }}>{label}</span>
+                      );
+                    })}
                   </div>
                 )}
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>{ts}</div>
