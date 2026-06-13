@@ -5,7 +5,7 @@ import { callAI, parseJSON } from '@/lib/ai';
 interface Observation { headline: string; detail: string; reference?: string }
 interface PlanSuggestion { field: 'triggers' | 'warning_signs' | 'replacement_behaviors'; text: string }
 interface Insights { observations: Observation[]; plan_suggestions: PlanSuggestion[]; crisis_line?: string }
-interface CacheRow { urge_count: number; surf_count: number; generated_at: string; insights: Insights | Record<string, never> }
+interface CacheRow { urge_count: number; generated_at: string; insights: Insights | Record<string, never> }
 
 const STOPWORDS = new Set(['i', 'a', 'the', 'and', 'or', 'but', 'to', 'of', 'in', 'it', 'was', 'is', 'my', 'me', 'had', 'at', 'so', 'just', 'an', 'for', 'on', 'with', 'that', 'this', 'felt', 'feel']);
 
@@ -14,17 +14,15 @@ const STOPWORDS = new Set(['i', 'a', 'the', 'and', 'or', 'but', 'to', 'of', 'in'
 // what was cached. No row yet → empty insights, stale=true.
 export async function GET() {
   const sb = supabaseServer();
-  const [cacheRes, urgeCountRes, surfCountRes] = await Promise.all([
-    sb.from('rp_patterns_cache').select('urge_count, surf_count, generated_at, insights').eq('id', 1).maybeSingle(),
+  const [cacheRes, urgeCountRes] = await Promise.all([
+    sb.from('rp_patterns_cache').select('urge_count, generated_at, insights').eq('id', 1).maybeSingle(),
     sb.from('recovery_urges').select('id', { count: 'exact', head: true }),
-    sb.from('urge_surfs').select('id', { count: 'exact', head: true }),
   ]);
 
   const currentUrges = urgeCountRes.count ?? 0;
-  const currentSurfs = surfCountRes.count ?? 0;
   const cache = cacheRes.data as CacheRow | null;
   const insights = (cache?.insights && 'observations' in cache.insights) ? cache.insights : null;
-  const stale = !insights || cache!.urge_count !== currentUrges || cache!.surf_count !== currentSurfs;
+  const stale = !insights || cache!.urge_count !== currentUrges;
 
   return NextResponse.json({
     insights,
@@ -42,16 +40,14 @@ export async function POST() {
   try {
     const sb = supabaseServer();
     const thirtyAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
-    const [urgesRes, surfsRes, settingsRes, diaryRes, planRes] = await Promise.all([
+    const [urgesRes, settingsRes, diaryRes, planRes] = await Promise.all([
       sb.from('recovery_urges').select('intensity, note, tags, created_at').order('created_at', { ascending: true }),
-      sb.from('urge_surfs').select('completed_seconds, full_completion, surfed_at').order('surfed_at', { ascending: true }),
       sb.from('recovery_settings').select('key, value'),
       sb.from('diary_entries').select('date, body, mood').gte('date', thirtyAgo).order('date', { ascending: false }),
       sb.from('rp_plan').select('triggers, warning_signs, replacement_behaviors, why').eq('id', 1).maybeSingle(),
     ]);
 
     const urges = (urgesRes.data ?? []) as Array<{ intensity: number; note: string | null; tags: string[] | null; created_at: string }>;
-    const surfs = (surfsRes.data ?? []) as Array<{ completed_seconds: number; full_completion: boolean; surfed_at: string }>;
     const settings: Record<string, string> = {};
     for (const s of settingsRes.data ?? []) settings[s.key] = s.value;
     const sobrietyStart = settings['sobriety_start'] ?? null;
@@ -62,7 +58,7 @@ export async function POST() {
         observations: [{ headline: 'Not enough data yet', detail: `Log a few more urges and the analysis gets specific. Right now you have ${urges.length} on record.` }],
         plan_suggestions: [],
       };
-      await sb.from('rp_patterns_cache').upsert({ id: 1, urge_count: urges.length, surf_count: surfs.length, generated_at: new Date().toISOString(), insights }, { onConflict: 'id' });
+      await sb.from('rp_patterns_cache').upsert({ id: 1, urge_count: urges.length, generated_at: new Date().toISOString(), insights }, { onConflict: 'id' });
       return NextResponse.json(insights);
     }
 
@@ -117,10 +113,6 @@ export async function POST() {
       .slice(0, 8)
       .map(([t, v]) => `${t}: ${v.count} urges, avg intensity ${(v.intensitySum / v.count).toFixed(2)} (vs overall ${avgIntensity.toFixed(2)})`);
 
-    const completedSurfs = surfs.filter(s => s.full_completion).length;
-    const surfRate = surfs.length ? `${completedSurfs}/${surfs.length} (${Math.round((completedSurfs / surfs.length) * 100)}%)` : 'no surf attempts logged';
-    const last5Surfs = surfs.slice(-5).map(s => `${new Date(s.surfed_at).toISOString().split('T')[0]} ${s.full_completion ? 'completed' : `partial ${Math.round(s.completed_seconds / 60)}m`}`).join('; ');
-
     const diaryEntries = (diaryRes.data ?? []).filter((d): d is { date: string; body: string; mood: number | null } => !!(d.body as string)?.trim());
     const moodCounts = [0, 0, 0, 0, 0];
     for (const d of diaryEntries) { if (d.mood) moodCounts[d.mood - 1]++; }
@@ -152,10 +144,6 @@ URGE TOTALS
 TAG IMPACT (ranked by avg intensity, min 2 occurrences — these are the tags doing the most harm)
 ${tagLines.length ? tagLines.map(l => `- ${l}`).join('\n') : '- (no tags logged yet)'}
 
-URGE SURF SUCCESS
-- Full completion rate: ${surfRate}
-- Last 5 attempts: ${last5Surfs || '(none)'}
-
 NOTE THEMES: ${topWords.length ? topWords.join(', ') : '(no notes recorded)'}
 ${moodLine ? moodLine + '\n' : ''}${diaryBlock}
 ${planBlock}
@@ -174,7 +162,7 @@ Return JSON with this exact shape:
 Rules:
 - Produce 2–3 observations. They must be SPECIFIC and grounded in the data (cite numbers like "Tired urges average 4.2/5 vs your overall 2.8/5" or "you logged 4 urges this Tuesday between 9pm–11pm"). Skip generic platitudes.
 - Produce 1–3 plan_suggestions. Each one must be a single concrete line that the user could literally paste into the named field. Do NOT duplicate text that is already in that field of the existing plan above.
-- The crisis_line is read at peak distress. Keep it grounded ("you've surfed this Sunday-evening pattern before — same playbook"), short, never preachy, never religious unless data clearly invites it.
+- The crisis_line is read at peak distress. Keep it grounded ("you've moved through this Sunday-evening pattern before — same playbook"), short, never preachy, never religious unless data clearly invites it.
 - If sobriety streak is high and the recent trend looks good, surface that as one observation — momentum matters.
 - The user is Muslim. At most one suggestion may draw on Islamic practice (dhikr/wudu/salah), only if it actually fits the pattern; never make it the only suggestion.
 - No quotes longer than 8 words from diary entries.
@@ -186,7 +174,6 @@ Rules:
     await sb.from('rp_patterns_cache').upsert({
       id: 1,
       urge_count: urges.length,
-      surf_count: surfs.length,
       generated_at: new Date().toISOString(),
       insights,
     }, { onConflict: 'id' });

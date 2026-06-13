@@ -6,13 +6,12 @@ interface TagImpact { name: string; count: number; avg_intensity: number; delta_
 interface HotTime { day: string; bucket: string; count: number }
 interface DailyPoint { date: string; count: number }
 interface Stats {
-  totals: { urges: number; surfs: number; urges_last30: number };
-  window: { last_count: number; prior_count: number; last_avg_intensity: number | null; prior_avg_intensity: number | null; last_surfs: number; prior_surfs: number };
+  totals: { urges: number; urges_last30: number };
+  window: { last_count: number; prior_count: number; last_avg_intensity: number | null; prior_avg_intensity: number | null };
   overall_avg_intensity: number;
   tags_by_harm: TagImpact[];
   tags_by_frequency: TagImpact[];
   hot_times: HotTime[];
-  surf: { total: number; completed: number; completion_rate: number | null };
   daily_30d: DailyPoint[];
 }
 
@@ -111,14 +110,13 @@ export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
     return <div className="card" style={{ marginBottom: 22, minHeight: 240 }} />;
   }
 
-  const { totals, window: w, tags_by_harm, tags_by_frequency, hot_times, surf, daily_30d, overall_avg_intensity } = stats;
+  const { totals, window: w, tags_by_harm, tags_by_frequency, hot_times, daily_30d, overall_avg_intensity } = stats;
   const maxDaily = Math.max(...daily_30d.map(d => d.count), 1);
   const maxHarmAvg = Math.max(...tags_by_harm.map(t => t.avg_intensity), 1);
   const maxFreqCount = Math.max(...tags_by_frequency.map(t => t.count), 1);
 
   const countDelta = pctDelta(w.last_count, w.prior_count);
   const intensityDelta = pctDelta(w.last_avg_intensity, w.prior_avg_intensity);
-  const surfDelta = pctDelta(w.last_surfs, w.prior_surfs);
 
   return (
     <div className="card" style={{ marginBottom: 22 }}>
@@ -132,7 +130,7 @@ export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
           display: flex; align-items: center; justify-content: space-between; gap: 8px;
         }
 
-        .up-shift-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .up-shift-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
         .up-shift-cell {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.06);
@@ -262,12 +260,6 @@ export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
             <div className="up-shift-prior">prior {fmt(w.prior_avg_intensity, 1)}</div>
             <DeltaBadge value={intensityDelta} invertColor />
           </div>
-          <div className="up-shift-cell">
-            <div className="up-shift-name">Surfs</div>
-            <div className="up-shift-value">{w.last_surfs}</div>
-            <div className="up-shift-prior">prior {w.prior_surfs}</div>
-            <DeltaBadge value={surfDelta} />
-          </div>
         </div>
       </div>
 
@@ -289,20 +281,6 @@ export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
           </div>
         ))}
       </div>
-
-      {/* ── Surf success ──────────────────────────────────────────────── */}
-      {surf.total > 0 && (
-        <div className="up-section">
-          <div className="up-label">Urge surf success</div>
-          <div className="up-bar-row">
-            <div className="up-bar-name">Completed</div>
-            <div className="up-bar-track">
-              <div className="up-bar-fill" style={{ width: `${(surf.completion_rate ?? 0) * 100}%`, background: 'rgba(107,227,164,0.6)' }} />
-            </div>
-            <div className="up-bar-meta">{surf.completed}/{surf.total} · {Math.round((surf.completion_rate ?? 0) * 100)}%</div>
-          </div>
-        </div>
-      )}
 
       {/* ── Most frequent tags (raw count, separate from harm) ────────── */}
       {tags_by_frequency.length > 0 && (

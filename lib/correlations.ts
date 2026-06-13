@@ -346,10 +346,10 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
       const firstAvg = mean(firstHalf);
       const secondAvg = mean(secondHalf);
       const change = secondAvg - firstAvg;
-      // Need at least ~0.4 intensity change to be worth surfacing.
-      if (Math.abs(change) >= 0.4 && urgeDays.length >= 6) {
+      // ~0.2 intensity change is enough to surface as a soft "watching" signal.
+      if (Math.abs(change) >= 0.2 && urgeDays.length >= 6) {
         const direction = change < 0 ? 'down' : 'up';
-        const strength: Correlation['strength'] = Math.abs(change) >= 1 ? 'strong' : Math.abs(change) >= 0.7 ? 'moderate' : 'weak';
+        const strength: Correlation['strength'] = Math.abs(change) >= 0.8 ? 'strong' : Math.abs(change) >= 0.5 ? 'moderate' : 'weak';
         candidates.push({
           id: 'urge-intensity-trend',
           finding: direction === 'down'
@@ -389,14 +389,53 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
         const ratio = obs / overall;
         if (ratio > peakRatio) { peakRatio = ratio; peakDow = i; }
       }
-      if (peakDow >= 0 && peakRatio >= 1.6) {
-        const strength: Correlation['strength'] = peakRatio >= 2.5 ? 'strong' : peakRatio >= 2 ? 'moderate' : 'weak';
+      if (peakDow >= 0 && peakRatio >= 1.4) {
+        const strength: Correlation['strength'] = peakRatio >= 2.2 ? 'strong' : peakRatio >= 1.7 ? 'moderate' : 'weak';
         candidates.push({
           id: 'urges-by-dow',
           finding: `Urges cluster on ${DOW_NAMES[peakDow]} — ${urgesByDow[peakDow]} of ${totalUrges} this window (${peakRatio.toFixed(1)}× your average day).`,
           action: `Pre-plan one specific recovery move for ${DOW_NAMES[peakDow]}.`,
           strength,
           samples: { a: activeByDow[peakDow], b: active.length - activeByDow[peakDow] },
+          confidence: 'high',
+        });
+      }
+    }
+  }
+
+  // ---------- 5b. Time-of-day urge clustering ----------
+  // Doesn't require habit / gym / diary cross-data — surfaces a pattern
+  // for users whose recovery log is the main data they keep.
+  {
+    const TIME_NAMES = ['mornings', 'afternoons', 'evenings', 'nights'] as const;
+    const buckets = [0, 0, 0, 0]; // 0=Morning 1=Afternoon 2=Evening 3=Night
+    function bucketFor(h: number): number {
+      if (h >= 6 && h < 12) return 0;
+      if (h >= 12 && h < 18) return 1;
+      if (h >= 18 && h < 22) return 2;
+      return 3;
+    }
+    for (const u of (urgesRes.data ?? [])) {
+      const t = new Date(u.created_at);
+      buckets[bucketFor(t.getHours())]++;
+    }
+    const total = buckets.reduce((s, n) => s + n, 0);
+    if (total >= 8) {
+      const avg = total / 4;
+      let peakIdx = -1, peakRatio = 0;
+      for (let i = 0; i < 4; i++) {
+        const ratio = buckets[i] / avg;
+        if (ratio > peakRatio) { peakRatio = ratio; peakIdx = i; }
+      }
+      if (peakIdx >= 0 && peakRatio >= 1.4) {
+        const strength: Correlation['strength'] = peakRatio >= 2.2 ? 'strong' : peakRatio >= 1.7 ? 'moderate' : 'weak';
+        const tName = TIME_NAMES[peakIdx];
+        candidates.push({
+          id: 'urges-by-time',
+          finding: `Urges cluster in the ${tName} — ${buckets[peakIdx]} of ${total} (${peakRatio.toFixed(1)}× the typical bucket).`,
+          action: `Pre-stage a recovery move for ${tName} (water, walk, journal).`,
+          strength,
+          samples: { a: buckets[peakIdx], b: total - buckets[peakIdx] },
           confidence: 'high',
         });
       }

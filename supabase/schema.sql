@@ -190,14 +190,10 @@ CREATE TABLE IF NOT EXISTS rp_plan (
 );
 INSERT INTO rp_plan(id) VALUES(1) ON CONFLICT DO NOTHING;
 
--- Urge surfing log — each row is one attempted surf (full or partial)
-CREATE TABLE IF NOT EXISTS urge_surfs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  surfed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  completed_seconds INTEGER NOT NULL,
-  full_completion BOOLEAN NOT NULL DEFAULT false
-);
-CREATE INDEX IF NOT EXISTS urge_surfs_at_idx ON urge_surfs(surfed_at DESC);
+-- The urge_surfs table is no longer used — the standalone "Surf an urge"
+-- feature was removed in favor of Crisis Mode covering the same ground. To
+-- drop it after the code is updated:
+--   DROP TABLE IF EXISTS urge_surfs;
 
 -- Whether this urge entry counts as a crisis-level moment (i.e. an "I made it"
 -- log from Crisis Mode, OR a normal urge the user later marked as crisis).
@@ -223,10 +219,11 @@ ALTER TABLE recovery_urges ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
 
 -- AI pattern-analysis cache (single row). Busted when the cached urge_count
 -- diverges from the current count — i.e. anything you log invalidates it.
+-- The legacy surf_count column is no longer used; safe to drop:
+--   ALTER TABLE rp_patterns_cache DROP COLUMN IF EXISTS surf_count;
 CREATE TABLE IF NOT EXISTS rp_patterns_cache (
   id INTEGER PRIMARY KEY DEFAULT 1,
   urge_count INTEGER NOT NULL DEFAULT 0,
-  surf_count INTEGER NOT NULL DEFAULT 0,
   generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   insights JSONB NOT NULL DEFAULT '{}'::jsonb
 );

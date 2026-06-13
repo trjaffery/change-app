@@ -1,13 +1,13 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Waves, FastForward, Eye, Snowflake, ChevronRight } from 'lucide-react';
+import { ArrowLeft, FastForward, Eye, Snowflake, ChevronRight } from 'lucide-react';
 import BottomSheet from '@/components/layout/BottomSheet';
 
 /**
  * Crisis mode — a 5-phase walkthrough for when an urge is hot. The user is
  * walked through rate-in → HALT-with-prescription → pick a tool → anchor (why)
  * → rate-out + "I made it". Tools include an in-sheet 5-4-3-2-1 grounding and
- * TIPP cold-reset; the existing "Surf the urge" and "Play it forward" routes
+ * TIPP cold-reset; the existing "Play it forward" route
  * also live here. The "I made it" exit logs to recovery_urges so future
  * patterns can surface "you survived 4 of 4 crisis opens this month".
  */
@@ -38,13 +38,11 @@ const COLD_SECONDS = 30;
 export default function CrisisMode({
   open,
   onClose,
-  onStartSurf,
   onOpenPlayTape,
   onOpenLogUrge,
 }: {
   open: boolean;
   onClose: () => void;
-  onStartSurf: () => void;
   onOpenPlayTape: () => void;
   onOpenLogUrge: () => void;
 }) {
@@ -398,11 +396,6 @@ export default function CrisisMode({
             <button className="cm-tool" onClick={() => setSubTool('cold')}>
               <Snowflake size={20} strokeWidth={1.75} className="icon" />
               <span>Cold reset (30s)<span className="desc">Cold water on face / hold ice. Resets your nervous system.</span></span>
-              <ChevronRight size={16} strokeWidth={2} className="chev" />
-            </button>
-            <button className="cm-tool" onClick={() => pickExternal(onStartSurf)}>
-              <Waves size={20} strokeWidth={1.75} className="icon" />
-              <span>Surf the urge<span className="desc">20-min timer with breathing.</span></span>
               <ChevronRight size={16} strokeWidth={2} className="chev" />
             </button>
             <button className="cm-tool" onClick={() => pickExternal(onOpenPlayTape)}>

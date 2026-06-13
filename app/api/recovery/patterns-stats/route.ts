@@ -19,12 +19,8 @@ function timeBucket(d: Date): 'Morning' | 'Afternoon' | 'Evening' | 'Night' {
 
 export async function GET() {
   const sb = supabaseServer();
-  const [urgesRes, surfsRes] = await Promise.all([
-    sb.from('recovery_urges').select('intensity, tags, created_at').order('created_at', { ascending: false }),
-    sb.from('urge_surfs').select('full_completion, completed_seconds, surfed_at').order('surfed_at', { ascending: false }),
-  ]);
-  const urges = (urgesRes.data ?? []) as Array<{ intensity: number; tags: string[] | null; created_at: string }>;
-  const surfs = (surfsRes.data ?? []) as Array<{ full_completion: boolean; completed_seconds: number; surfed_at: string }>;
+  const { data: urgesData } = await sb.from('recovery_urges').select('intensity, tags, created_at').order('created_at', { ascending: false });
+  const urges = (urgesData ?? []) as Array<{ intensity: number; tags: string[] | null; created_at: string }>;
 
   const now = Date.now();
   const last7Cut = now - 7 * 86400000;
@@ -34,8 +30,6 @@ export async function GET() {
   // ── 7d vs prior 7d window ───────────────────────────────────────────────
   const last7 = urges.filter(u => new Date(u.created_at).getTime() >= last7Cut);
   const prior7 = urges.filter(u => { const t = new Date(u.created_at).getTime(); return t >= prior7Cut && t < last7Cut; });
-  const last7Surfs = surfs.filter(s => new Date(s.surfed_at).getTime() >= last7Cut);
-  const prior7Surfs = surfs.filter(s => { const t = new Date(s.surfed_at).getTime(); return t >= prior7Cut && t < last7Cut; });
   const last7Avg = last7.length ? last7.reduce((s, u) => s + u.intensity, 0) / last7.length : null;
   const prior7Avg = prior7.length ? prior7.reduce((s, u) => s + u.intensity, 0) / prior7.length : null;
 
@@ -79,10 +73,6 @@ export async function GET() {
     .sort((a, b) => b.count - a.count)
     .slice(0, 3);
 
-  // ── Urge surf success ───────────────────────────────────────────────────
-  const surfCompleted = surfs.filter(s => s.full_completion).length;
-  const surfRate = surfs.length ? surfCompleted / surfs.length : null;
-
   // ── 30-day daily trend (newest at end, for left-to-right bar chart) ─────
   const daily: { date: string; count: number }[] = [];
   for (let i = 29; i >= 0; i--) {
@@ -95,7 +85,6 @@ export async function GET() {
   return NextResponse.json({
     totals: {
       urges: urges.length,
-      surfs: surfs.length,
       urges_last30: daysWithUrges30,
     },
     window: {
@@ -103,14 +92,11 @@ export async function GET() {
       prior_count: prior7.length,
       last_avg_intensity: last7Avg,
       prior_avg_intensity: prior7Avg,
-      last_surfs: last7Surfs.length,
-      prior_surfs: prior7Surfs.length,
     },
     overall_avg_intensity: overallAvg,
     tags_by_harm: worstByHarm,
     tags_by_frequency: byFrequency,
     hot_times: hotTimes,
-    surf: { total: surfs.length, completed: surfCompleted, completion_rate: surfRate },
     daily_30d: daily,
   });
 }

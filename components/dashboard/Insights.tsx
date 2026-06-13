@@ -116,7 +116,7 @@ export default function Insights() {
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic', wordBreak: 'break-word' }}>Error: {errorMsg}</p>
       ) : !correlations || correlations.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--text-tertiary)', margin: 0, lineHeight: 1.6 }}>
-          Not enough data yet — keep logging and patterns across your habits, gym, and recovery will show up here.
+          No strong patterns surfaced in the last 30 days. Cross-domain signals need a mix of habits, workouts, and recovery logs to show up — recovery-only data shows up in the Patterns card on your recovery page instead.
         </p>
       ) : (
         <>
