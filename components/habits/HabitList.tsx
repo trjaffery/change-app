@@ -312,6 +312,11 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
     }
 
     if (g.state === 'reordering') {
+      // Belt + braces: prevent the browser from interpreting subsequent vertical
+      // movement as page scroll (CSS touch-action: none on the dragged row also
+      // covers this, but some mobile browsers commit to pan-y before the
+      // touch-action change applies).
+      if (e.cancelable) e.preventDefault();
       setRowTransform(g.id, `translateY(${dy}px) scale(1.02)`);
       const slotShift = Math.round(dy / Math.max(1, g.rowHeight));
       const targetIdx = Math.max(0, Math.min(habits.length - 1, g.initialIdx + slotShift));
@@ -383,11 +388,11 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
     <>
       <style>{`
         .habit-row-wrap { position: relative; border-radius: 12px; overflow: hidden; touch-action: pan-y; }
-        .habit-row-wrap.dragging { overflow: visible; }
+        .habit-row-wrap.dragging { overflow: visible; touch-action: none; }
         .habit-row { position: relative; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 12px; background-color: rgba(20,20,22,1); border: 1px solid rgba(255,255,255,0.05); transition: transform 220ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms ease, background 0.2s, border-color 0.2s; will-change: transform; user-select: none; -webkit-user-select: none; cursor: grab; touch-action: pan-y; }
         .habit-row:active { cursor: grabbing; }
         .habit-row.done { background-color: rgba(28,28,30,1); border-color: rgba(255,255,255,0.09); }
-        .habit-row.reordering { z-index: 20; box-shadow: 0 14px 28px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08); cursor: grabbing; }
+        .habit-row.reordering { z-index: 20; box-shadow: 0 14px 28px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08); cursor: grabbing; touch-action: none; }
         .habit-drop-indicator { height: 0; border-top: 2px solid var(--success); margin: 3px 6px; border-radius: 1px; pointer-events: none; box-shadow: 0 0 10px rgba(107,227,164,0.4); animation: drop-pulse 1.2s ease-in-out infinite; }
         @keyframes drop-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
         .habit-actions { position: absolute; top: 0; bottom: 0; right: 0; width: ${ACTION_WIDTH}px; display: flex; align-items: stretch; gap: 4px; padding: 4px 4px 4px 0; z-index: 1; }

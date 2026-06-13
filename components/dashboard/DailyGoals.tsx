@@ -213,6 +213,7 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
     }
 
     if (g.state === 'reordering') {
+      if (e.cancelable) e.preventDefault();
       setRowTransform(g.id, `translateY(${dy}px) scale(1.02)`);
       const slotShift = Math.round(dy / Math.max(1, g.rowHeight));
       const targetIdx = Math.max(0, Math.min(goals.length - 1, g.initialIdx + slotShift));
@@ -261,7 +262,7 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
         .dg-row { position: relative; display:flex; align-items:center; gap:10px; padding:9px 6px; border-bottom:1px solid rgba(255,255,255,0.04); border-radius: 8px; transition: transform 220ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms ease; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
         .dg-row:active { cursor: grabbing; }
         .dg-row:last-of-type { border-bottom:none; }
-        .dg-row.reordering { z-index: 20; box-shadow: 0 12px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08); background: rgba(20,20,22,1); border-color: transparent; cursor: grabbing; }
+        .dg-row.reordering { z-index: 20; box-shadow: 0 12px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08); background: rgba(20,20,22,1); border-color: transparent; cursor: grabbing; touch-action: none; }
         .dg-drop-indicator { height: 0; border-top: 2px solid var(--success); margin: 2px 8px; border-radius: 1px; pointer-events: none; box-shadow: 0 0 8px rgba(107,227,164,0.4); animation: dg-drop-pulse 1.2s ease-in-out infinite; }
         @keyframes dg-drop-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
         .dg-check { width:22px; height:22px; border-radius:7px; border:1px solid rgba(255,255,255,0.12); background:transparent; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:all 0.15s; }
