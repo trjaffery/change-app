@@ -1,5 +1,6 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { getActiveDateString, toDateString, formatDate } from '@/lib/dates';
 import BottomSheet from '@/components/layout/BottomSheet';
 
@@ -13,7 +14,12 @@ interface Habit {
   goal_period: 'day' | 'week' | 'month';
   goal_value: number;
   schedule_type: string;
+  schedule_days: number[] | null;
+  schedule_count: number | null;
 }
+
+type ScheduleType = 'daily' | 'specific_days_week' | 'days_per_week' | 'specific_days_month' | 'days_per_month';
+const ACTION_WIDTH = 128;
 
 const PRESET_COLORS = [
   '#6BE3A4', '#F2C063', '#FF6B6B', '#5B9FE8',
@@ -53,11 +59,42 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   // Form state
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
-  const [scheduleType, setScheduleType] = useState<'daily' | 'specific_days_week' | 'days_per_week' | 'specific_days_month' | 'days_per_month'>('daily');
+  const [scheduleType, setScheduleType] = useState<ScheduleType>('daily');
   const [scheduleDays, setScheduleDays] = useState<number[]>([]);
   const [scheduleCount, setScheduleCount] = useState(3);
   const [goalPeriod, setGoalPeriod] = useState<'day' | 'week' | 'month'>('day');
   const [goalValue, setGoalValue] = useState(1);
+
+  // Edit state — single sheet, single-page form
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState(PRESET_COLORS[0]);
+  const [editScheduleType, setEditScheduleType] = useState<ScheduleType>('daily');
+  const [editScheduleDays, setEditScheduleDays] = useState<number[]>([]);
+  const [editScheduleCount, setEditScheduleCount] = useState(3);
+  const [editGoalPeriod, setEditGoalPeriod] = useState<'day' | 'week' | 'month'>('day');
+  const [editGoalValue, setEditGoalValue] = useState(1);
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Gesture: each row supports three pointer interactions, disambiguated by a
+  // small state machine kept entirely in a ref so pointermove never re-renders.
+  //   • Quick tap on +/− or check button → button onClick fires normally
+  //   • Horizontal pointer drag (>8px, dx > dy) → swipe-to-reveal Edit/Delete
+  //   • Long-press (320ms, no movement) → enter drag-reorder mode
+  //   • Vertical drag before any of the above → bail (native scroll)
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const gestureRef = useRef<null | {
+    id: string;
+    startX: number; startY: number;
+    state: 'pending' | 'swiping' | 'reordering' | 'cancelled';
+    baseOffset: number;
+    longPressTimer: ReturnType<typeof setTimeout> | null;
+    initialIdx: number;
+    rowHeight: number;
+  }>(null);
 
   const onCompletionChangeRef = useRef(onCompletionChange);
   useEffect(() => { onCompletionChangeRef.current = onCompletionChange; }, [onCompletionChange]);
@@ -155,18 +192,210 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
   async function deleteHabit(id: string) {
     if (!confirm('Delete this habit? All history will be lost.')) return;
     await fetch(`/api/habits/${id}`, { method: 'DELETE' });
+    setRevealedId(null);
     fetchHabits();
   }
+
+  function startEdit(habit: Habit) {
+    setEditId(habit.id);
+    setEditName(habit.name);
+    setEditColor(habit.color);
+    setEditScheduleType(habit.schedule_type as ScheduleType);
+    setEditScheduleDays(habit.schedule_days ?? []);
+    setEditScheduleCount(habit.schedule_count ?? 3);
+    setEditGoalPeriod(habit.goal_period);
+    setEditGoalValue(habit.goal_value);
+    setRevealedId(null);
+  }
+  function cancelEdit() { setEditId(null); }
+  async function saveEdit() {
+    if (!editId || !editName.trim() || editSaving) return;
+    setEditSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        name: editName.trim(),
+        color: editColor,
+        schedule_type: editScheduleType,
+        goal_period: editGoalPeriod,
+        goal_value: editGoalValue,
+        // Wipe schedule fields that don't apply to the current type so they don't
+        // linger as stale data and confuse the AI/stats next time we read them.
+        schedule_days: (editScheduleType === 'specific_days_week' || editScheduleType === 'specific_days_month') ? editScheduleDays : null,
+        schedule_count: (editScheduleType === 'days_per_week' || editScheduleType === 'days_per_month') ? editScheduleCount : null,
+      };
+      await fetch(`/api/habits/${editId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      cancelEdit();
+      fetchHabits();
+    } finally { setEditSaving(false); }
+  }
+  function toggleEditScheduleDay(d: number) {
+    setEditScheduleDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+  }
+
+  // Direct-DOM transform writer. Avoids React re-renders during drag/swipe.
+  function setRowTransform(id: string, value: string, options: { transition?: string } = {}) {
+    const el = rowRefs.current.get(id);
+    if (!el) return;
+    if (options.transition !== undefined) el.style.transition = options.transition;
+    el.style.transform = value;
+  }
+
+  function enterReorderMode(habitId: string, pointerId: number) {
+    const g = gestureRef.current;
+    if (!g || g.state !== 'pending' || g.id !== habitId) return;
+    g.state = 'reordering';
+    g.longPressTimer = null;
+    const el = rowRefs.current.get(habitId);
+    if (!el) return;
+    el.setPointerCapture(pointerId);
+    // Close any other swipe-revealed row before lifting this one.
+    if (revealedId && revealedId !== habitId) {
+      setRowTransform(revealedId, '', { transition: '' });
+      setRevealedId(null);
+    } else if (revealedId === habitId) {
+      // Was swiped open; snap back so the row starts at home position.
+      setRevealedId(null);
+    }
+    setRowTransform(habitId, 'translateY(0) scale(1.02)', { transition: 'none' });
+    el.classList.add('reordering');
+    setDraggedId(habitId);
+    setDropIndex(g.initialIdx);
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try { navigator.vibrate(15); } catch { /* not all browsers honour vibrate */ }
+    }
+  }
+
+  function onRowPointerDown(e: React.PointerEvent<HTMLDivElement>, habitId: string, idx: number) {
+    if ((e.target as HTMLElement).closest('[data-no-swipe]')) return;
+    const rowEl = rowRefs.current.get(habitId);
+    if (!rowEl) return;
+    const baseOffset = revealedId === habitId ? -ACTION_WIDTH : 0;
+    const pointerId = e.pointerId;
+    const longPressTimer = setTimeout(() => enterReorderMode(habitId, pointerId), 320);
+    gestureRef.current = {
+      id: habitId,
+      startX: e.clientX, startY: e.clientY,
+      state: 'pending',
+      baseOffset,
+      longPressTimer,
+      initialIdx: idx,
+      rowHeight: rowEl.getBoundingClientRect().height,
+    };
+  }
+
+  function onRowPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const g = gestureRef.current;
+    if (!g) return;
+    const dx = e.clientX - g.startX;
+    const dy = e.clientY - g.startY;
+
+    if (g.state === 'pending') {
+      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+        if (g.longPressTimer) { clearTimeout(g.longPressTimer); g.longPressTimer = null; }
+        g.state = 'swiping';
+        const el = rowRefs.current.get(g.id);
+        if (el) { el.style.transition = 'none'; el.setPointerCapture(e.pointerId); }
+      } else if (Math.abs(dy) > 8) {
+        if (g.longPressTimer) { clearTimeout(g.longPressTimer); g.longPressTimer = null; }
+        g.state = 'cancelled';
+      } else {
+        return;
+      }
+    }
+
+    if (g.state === 'swiping') {
+      const next = Math.max(-ACTION_WIDTH - 16, Math.min(0, g.baseOffset + dx));
+      setRowTransform(g.id, `translateX(${next}px)`);
+    }
+
+    if (g.state === 'reordering') {
+      setRowTransform(g.id, `translateY(${dy}px) scale(1.02)`);
+      const slotShift = Math.round(dy / Math.max(1, g.rowHeight));
+      const targetIdx = Math.max(0, Math.min(habits.length - 1, g.initialIdx + slotShift));
+      setDropIndex(prev => prev === targetIdx ? prev : targetIdx);
+    }
+  }
+
+  function onRowPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const g = gestureRef.current;
+    if (!g) { return; }
+    if (g.longPressTimer) { clearTimeout(g.longPressTimer); g.longPressTimer = null; }
+
+    if (g.state === 'swiping') {
+      const dx = e.clientX - g.startX;
+      const final = g.baseOffset + dx;
+      const open = final < -ACTION_WIDTH / 2;
+      const el = rowRefs.current.get(g.id);
+      if (el) {
+        el.style.transition = '';
+        el.style.transform = open ? `translateX(${-ACTION_WIDTH}px)` : '';
+      }
+      setRevealedId(open ? g.id : null);
+    } else if (g.state === 'reordering') {
+      const el = rowRefs.current.get(g.id);
+      if (el) {
+        el.classList.remove('reordering');
+        el.style.transition = '';
+        el.style.transform = '';
+      }
+      const target = dropIndex ?? g.initialIdx;
+      if (target !== g.initialIdx) commitReorder(g.id, g.initialIdx, target);
+      setDraggedId(null);
+      setDropIndex(null);
+    }
+    gestureRef.current = null;
+  }
+
+  async function commitReorder(id: string, from: number, to: number) {
+    const next = [...habits];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setHabits(next);
+    // PATCH each habit's new position in parallel. Server keeps its own
+    // canonical sort by position; the next fetch will rehydrate from there.
+    await Promise.all(next.map((h, i) => fetch(`/api/habits/${h.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ position: i }),
+    })));
+  }
+
+  // Close revealed row when clicking elsewhere on the page.
+  useEffect(() => {
+    if (!revealedId) return;
+    const openId: string = revealedId;
+    function onDocPointer(e: PointerEvent) {
+      const t = e.target as HTMLElement;
+      if (!t.closest(`[data-habit-wrap="${openId}"]`)) {
+        setRowTransform(openId, '', { transition: '' });
+        setRevealedId(null);
+      }
+    }
+    document.addEventListener('pointerdown', onDocPointer);
+    return () => document.removeEventListener('pointerdown', onDocPointer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealedId]);
+
 
   return (
     <>
       <style>{`
-        .habit-row { display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); transition:background 0.2s, border-color 0.2s; }
-        .habit-row.done { background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.09); }
-        .habit-check { width:30px; height:30px; border-radius:50%; border:2px solid; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s; flex-shrink:0; background:transparent; }
-        .habit-delete { background:none; border:none; color:var(--text-tertiary); cursor:pointer; font-size:18px; padding:0 4px; opacity:0; transition:opacity 0.15s; flex-shrink:0; line-height:1; }
-        .habit-row:hover .habit-delete { opacity:0.4; }
-        .habit-delete:hover { opacity:1 !important; color:var(--danger); }
+        .habit-row-wrap { position: relative; border-radius: 12px; overflow: hidden; touch-action: pan-y; }
+        .habit-row-wrap.dragging { overflow: visible; }
+        .habit-row { position: relative; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 12px; background-color: rgba(20,20,22,1); border: 1px solid rgba(255,255,255,0.05); transition: transform 220ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms ease, background 0.2s, border-color 0.2s; will-change: transform; user-select: none; -webkit-user-select: none; cursor: grab; touch-action: pan-y; }
+        .habit-row:active { cursor: grabbing; }
+        .habit-row.done { background-color: rgba(28,28,30,1); border-color: rgba(255,255,255,0.09); }
+        .habit-row.reordering { z-index: 20; box-shadow: 0 14px 28px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08); cursor: grabbing; }
+        .habit-drop-indicator { height: 0; border-top: 2px solid var(--success); margin: 3px 6px; border-radius: 1px; pointer-events: none; box-shadow: 0 0 10px rgba(107,227,164,0.4); animation: drop-pulse 1.2s ease-in-out infinite; }
+        @keyframes drop-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .habit-actions { position: absolute; top: 0; bottom: 0; right: 0; width: ${ACTION_WIDTH}px; display: flex; align-items: stretch; gap: 4px; padding: 4px 4px 4px 0; z-index: 1; }
+        .habit-action-btn { flex: 1; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; -webkit-tap-highlight-color: transparent; transition: filter 160ms ease; gap: 4px; flex-direction: column; }
+        .habit-action-btn.edit { background: rgba(91,159,232,0.16); color: #78B4FF; border: 1px solid rgba(91,159,232,0.3); }
+        .habit-action-btn.delete { background: rgba(255,107,107,0.16); color: var(--danger); border: 1px solid rgba(255,107,107,0.3); }
+        .habit-action-btn:hover { filter: brightness(1.15); }
+        .habit-check { width: 36px; height: 36px; border-radius: 50%; border: 2px solid; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; background: transparent; }
         .color-swatch { width:26px; height:26px; border-radius:50%; cursor:pointer; border:3px solid transparent; transition:border-color 0.15s; flex-shrink:0; padding:0; }
         .color-swatch.selected { border-color:white; }
         .seg-btn { padding:6px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); background:transparent; color:var(--text-secondary); font-size:12px; cursor:pointer; transition:all 0.15s; white-space:nowrap; }
@@ -174,9 +403,10 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
         .day-btn { width:32px; height:32px; border-radius:8px; border:1px solid rgba(255,255,255,0.08); background:transparent; color:var(--text-secondary); font-size:11px; font-weight:600; cursor:pointer; transition:all 0.15s; }
         .day-btn.active { border-color:rgba(255,255,255,0.25); color:var(--text-primary); }
         .progress-bar-track { flex:1; height:4px; border-radius:2px; background:rgba(255,255,255,0.08); overflow:hidden; }
-        .count-btn { width:28px; height:28px; border-radius:8px; border:1px solid rgba(255,255,255,0.1); background:transparent; color:var(--text-secondary); font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.15s; flex-shrink:0; }
-        .count-btn:hover { border-color:rgba(255,255,255,0.25); color:var(--text-primary); }
-        .count-btn:disabled { opacity:0.25; cursor:default; }
+        .count-btn { width: 40px; height: 40px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.03); color: var(--text-secondary); font-size: 20px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; -webkit-tap-highlight-color: transparent; line-height: 1; }
+        .count-btn:hover { border-color: rgba(255,255,255,0.3); color: var(--text-primary); background: rgba(255,255,255,0.06); }
+        .count-btn:active { transform: scale(0.94); }
+        .count-btn:disabled { opacity: 0.25; cursor: default; }
         .form-label { font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-tertiary); margin-bottom:8px; }
       `}</style>
       <div className="card" style={{ marginBottom: 22 }}>
@@ -377,67 +607,208 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
           </div>
         </BottomSheet>
 
+        <BottomSheet open={editId !== null} onClose={() => !editSaving && cancelEdit()} title="Edit habit" disableBackdropClose={editSaving}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div>
+              <div className="form-label" style={{ marginBottom: 8 }}>Name</div>
+              <input
+                className="text-input"
+                type="text"
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && editName.trim()) saveEdit(); }}
+                style={{ width: '100%' }}
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <div className="form-label" style={{ marginBottom: 8 }}>Accent color</div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {PRESET_COLORS.map(c => (
+                  <button key={c} className={`color-swatch${editColor === c ? ' selected' : ''}`} onClick={() => setEditColor(c)} style={{ background: c, width: 32, height: 32 }} />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="form-label" style={{ marginBottom: 8 }}>How often</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(['daily', 'specific_days_week', 'days_per_week', 'specific_days_month', 'days_per_month'] as const).map(type => (
+                  <button key={type} className={`seg-btn${editScheduleType === type ? ' active' : ''}`} onClick={() => setEditScheduleType(type)}>
+                    {type === 'daily' ? 'Every day'
+                      : type === 'specific_days_week' ? 'Specific days'
+                      : type === 'days_per_week' ? 'X days/week'
+                      : type === 'specific_days_month' ? 'Specific dates'
+                      : 'X days/month'}
+                  </button>
+                ))}
+              </div>
+
+              {editScheduleType === 'specific_days_week' && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                  {DAYS_SHORT.map((d, i) => (
+                    <button key={d} className={`day-btn${editScheduleDays.includes(i) ? ' active' : ''}`}
+                      onClick={() => toggleEditScheduleDay(i)}
+                      style={{ background: editScheduleDays.includes(i) ? `${editColor}22` : 'transparent', borderColor: editScheduleDays.includes(i) ? editColor : undefined, color: editScheduleDays.includes(i) ? editColor : undefined }}>
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {editScheduleType === 'days_per_week' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                  <input type="number" min={1} max={7} value={editScheduleCount} onChange={e => setEditScheduleCount(Number(e.target.value))} className="text-input" style={{ width: 72 }} />
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>days per week</span>
+                </div>
+              )}
+
+              {editScheduleType === 'specific_days_month' && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 10 }}>
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
+                    <button key={d} className={`day-btn${editScheduleDays.includes(d) ? ' active' : ''}`}
+                      onClick={() => toggleEditScheduleDay(d)}
+                      style={{ width: 36, fontSize: 11, background: editScheduleDays.includes(d) ? `${editColor}22` : 'transparent', borderColor: editScheduleDays.includes(d) ? editColor : undefined, color: editScheduleDays.includes(d) ? editColor : undefined }}>
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {editScheduleType === 'days_per_month' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                  <input type="number" min={1} max={31} value={editScheduleCount} onChange={e => setEditScheduleCount(Number(e.target.value))} className="text-input" style={{ width: 72 }} />
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>days per month</span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="form-label" style={{ marginBottom: 8 }}>Goal</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <input
+                  type="number"
+                  min={1}
+                  value={editGoalValue}
+                  onChange={e => setEditGoalValue(Math.max(1, Number(e.target.value)))}
+                  className="text-input"
+                  style={{ width: 80, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: '10px' }}
+                />
+                <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>× per</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {(['day', 'week', 'month'] as const).map(p => (
+                    <button key={p} className={`seg-btn${editGoalPeriod === p ? ' active' : ''}`} onClick={() => setEditGoalPeriod(p)}>{p}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn-secondary" style={{ fontSize: 13 }} onClick={cancelEdit} disabled={editSaving}>Cancel</button>
+              <button className="btn-primary" style={{ fontSize: 13 }} onClick={saveEdit} disabled={editSaving || !editName.trim()}>
+                {editSaving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </BottomSheet>
+
         {habits.length === 0 && !adding && (
           <div className="empty-state">No habits yet — add one to start tracking.</div>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {habits.map(habit => {
+          {habits.map((habit, idx) => {
             const pct = habit.goal_value > 0 ? Math.min(1, habit.period_done / habit.goal_value) : 0;
             const isGoalOne = habit.goal_value === 1;
+            const isDraggedRow = draggedId === habit.id;
+            const indicatorBefore = draggedId !== null && dropIndex === idx && dropIndex !== habits.findIndex(h => h.id === draggedId);
 
             return (
-              <div key={habit.id} className={`habit-row${habit.is_complete ? ' done' : ''}`} style={{ borderLeft: `3px solid ${habit.color}` }}>
-                {isGoalOne ? (
-                  <button className="habit-check" onClick={() => habit.is_complete ? decrement(habit) : increment(habit)}
-                    style={{ borderColor: habit.color, background: habit.is_complete ? habit.color : 'transparent' }}>
-                    {habit.is_complete && (
-                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                        <path d="M2 6.5L5.2 9.5L11 3.5" stroke="#050506" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    )}
-                  </button>
-                ) : (
-                  <button className="count-btn" onClick={() => decrement(habit)} disabled={habit.period_done === 0}>−</button>
+              <Fragment key={habit.id}>
+                {indicatorBefore && <div className="habit-drop-indicator" />}
+              <div className={`habit-row-wrap${isDraggedRow ? ' dragging' : ''}`} data-habit-wrap={habit.id}>
+                {!isDraggedRow && (
+                  <div className="habit-actions">
+                    <button data-no-swipe className="habit-action-btn edit" onClick={() => startEdit(habit)} aria-label="Edit habit">
+                      <Pencil size={14} strokeWidth={2} />
+                      EDIT
+                    </button>
+                    <button data-no-swipe className="habit-action-btn delete" onClick={() => deleteHabit(habit.id)} aria-label="Delete habit">
+                      <Trash2 size={14} strokeWidth={2} />
+                      DELETE
+                    </button>
+                  </div>
                 )}
+                <div
+                  ref={el => {
+                    if (el) rowRefs.current.set(habit.id, el);
+                    else rowRefs.current.delete(habit.id);
+                  }}
+                  className={`habit-row${habit.is_complete ? ' done' : ''}${isDraggedRow ? ' reordering' : ''}`}
+                  style={{
+                    borderLeft: `3px solid ${habit.color}`,
+                    transform: revealedId === habit.id ? `translateX(${-ACTION_WIDTH}px)` : undefined,
+                  }}
+                  onPointerDown={e => onRowPointerDown(e, habit.id, idx)}
+                  onPointerMove={onRowPointerMove}
+                  onPointerUp={onRowPointerUp}
+                  onPointerCancel={onRowPointerUp}
+                >
+                  {isGoalOne ? (
+                    <button data-no-swipe className="habit-check" onClick={() => habit.is_complete ? decrement(habit) : increment(habit)}
+                      style={{ borderColor: habit.color, background: habit.is_complete ? habit.color : 'transparent' }}>
+                      {habit.is_complete && (
+                        <svg width="15" height="15" viewBox="0 0 13 13" fill="none">
+                          <path d="M2 6.5L5.2 9.5L11 3.5" stroke="#050506" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </button>
+                  ) : (
+                    <button data-no-swipe className="count-btn" onClick={() => decrement(habit)} disabled={habit.period_done === 0}>−</button>
+                  )}
 
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: !isGoalOne ? 6 : 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: habit.is_complete ? 'var(--text-secondary)' : 'var(--text-primary)', textDecoration: habit.is_complete ? 'line-through' : 'none', transition: 'all 0.2s', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {habit.name}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: !isGoalOne ? 6 : 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: habit.is_complete ? 'var(--text-secondary)' : 'var(--text-primary)', textDecoration: habit.is_complete ? 'line-through' : 'none', transition: 'all 0.2s', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {habit.name}
+                      </div>
+                      {!isGoalOne && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: habit.is_complete ? habit.color : 'var(--text-secondary)', flexShrink: 0 }}>
+                          {habit.period_done}/{habit.goal_value}
+                        </span>
+                      )}
                     </div>
+
                     {!isGoalOne && (
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: habit.is_complete ? habit.color : 'var(--text-secondary)', flexShrink: 0 }}>
-                        {habit.period_done}/{habit.goal_value}
-                      </span>
+                      <div className="progress-bar-track">
+                        <div style={{ height: '100%', borderRadius: 2, background: habit.color, width: `${pct * 100}%`, transition: 'width 0.4s cubic-bezier(0.22,1,0.36,1)' }} />
+                      </div>
+                    )}
+
+                    {habit.streak > 0 && isGoalOne && (
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                        {habit.streak} day streak
+                      </div>
+                    )}
+                    {!isGoalOne && (
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                        {periodLabel(habit)}{habit.streak > 0 ? ` · ${habit.streak} day streak` : ''}
+                      </div>
                     )}
                   </div>
 
                   {!isGoalOne && (
-                    <div className="progress-bar-track">
-                      <div style={{ height: '100%', borderRadius: 2, background: habit.color, width: `${pct * 100}%`, transition: 'width 0.4s cubic-bezier(0.22,1,0.36,1)' }} />
-                    </div>
-                  )}
-
-                  {habit.streak > 0 && isGoalOne && (
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                      {habit.streak} day streak
-                    </div>
-                  )}
-                  {!isGoalOne && (
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                      {periodLabel(habit)}{habit.streak > 0 ? ` · ${habit.streak} day streak` : ''}
-                    </div>
+                    <button data-no-swipe className="count-btn" onClick={() => increment(habit)} style={{ borderColor: habit.is_complete ? habit.color : undefined }}>+</button>
                   )}
                 </div>
-
-                {!isGoalOne && (
-                  <button className="count-btn" onClick={() => increment(habit)} style={{ borderColor: habit.is_complete ? habit.color : undefined }}>+</button>
-                )}
-                <button className="habit-delete" onClick={() => deleteHabit(habit.id)}>×</button>
               </div>
+              </Fragment>
             );
           })}
+          {draggedId !== null && dropIndex === habits.length && dropIndex !== habits.findIndex(h => h.id === draggedId) && (
+            <div className="habit-drop-indicator" />
+          )}
         </div>
       </div>
     </>

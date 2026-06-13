@@ -45,7 +45,7 @@ export async function GET() {
   const [settingsRes, relapsesRes, urgesRes, surfsRes, diaryRes] = await Promise.all([
     sb.from('recovery_settings').select('key, value'),
     sb.from('recovery_relapses').select('created_at').order('created_at', { ascending: true }),
-    sb.from('recovery_urges').select('intensity, note, created_at').order('created_at', { ascending: false }),
+    sb.from('recovery_urges').select('intensity, note, is_crisis, created_at').order('created_at', { ascending: false }),
     sb.from('urge_surfs').select('full_completion, completed_seconds, surfed_at').order('surfed_at', { ascending: false }),
     sb.from('diary_entries').select('date, mood, body').gte('date', thirtyAgoDate).not('mood', 'is', null).order('date', { ascending: false }),
   ]);
@@ -76,9 +76,12 @@ export async function GET() {
     longest = gaps.reduce((m, g) => Math.max(m, g), 0);
   }
 
-  // ── Crisis-mode survival count ──────────────────────────────────────
-  const urges = (urgesRes.data ?? []) as { intensity: number; note: string | null; created_at: string }[];
-  const crisisUrges = urges.filter(u => (u.note ?? '').startsWith('[crisis-mode]'));
+  // ── Crisis-level urge count (structural flag, set either by the Crisis
+  // Mode "I made it" flow or by the user editing a past urge). Legacy
+  // [crisis-mode] note prefix is also honored so pre-backfill data still
+  // counts even if someone forgot to run the SQL migration.
+  const urges = (urgesRes.data ?? []) as { intensity: number; note: string | null; is_crisis: boolean | null; created_at: string }[];
+  const crisisUrges = urges.filter(u => u.is_crisis || (u.note ?? '').startsWith('[crisis-mode]'));
 
   // ── Surf success ─────────────────────────────────────────────────────
   const surfs = (surfsRes.data ?? []) as { full_completion: boolean; completed_seconds: number; surfed_at: string }[];
@@ -95,11 +98,12 @@ export async function GET() {
     const t = after.getTime();
     return relapseTimes.some(rt => rt > t && rt - t <= 86400000);
   }
-  const urgesNoAct30: { intensity: number; note: string | null; created_at: string }[] = [];
+  const urgesNoAct30: { intensity: number; note: string | null; is_crisis: boolean | null; created_at: string }[] = [];
   for (const u of urges) {
     const t = new Date(u.created_at).getTime();
     if (t < Date.now() - 30 * 86400000) break; // urges already sorted desc
-    if (u.intensity >= 3 && !relapseWithin24h(new Date(u.created_at)) && !(u.note ?? '').startsWith('[crisis-mode]')) {
+    const isCrisis = u.is_crisis || (u.note ?? '').startsWith('[crisis-mode]');
+    if (u.intensity >= 3 && !relapseWithin24h(new Date(u.created_at)) && !isCrisis) {
       urgesNoAct30.push(u);
     }
   }

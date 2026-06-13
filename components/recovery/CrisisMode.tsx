@@ -124,8 +124,9 @@ export default function CrisisMode({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           intensity: Math.max(1, Math.min(5, Math.round(intensityOut / 2))),
-          note: `[crisis-mode] started ${intensityIn}/10 → ended ${intensityOut}/10`,
+          note: `Started ${intensityIn}/10 → ended ${intensityOut}/10`,
           tags,
+          is_crisis: true,
         }),
       });
     } finally {

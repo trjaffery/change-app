@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { getActiveDateString, getTomorrowDateString } from '@/lib/dates';
 import { useToast } from '@/components/layout/Toast';
 
@@ -23,6 +23,18 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
   const [editText, setEditText] = useState('');
   const [pushing, setPushing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Long-press to reorder. Single state machine per row — same as habits but
+  // simpler since goals have no swipe gesture to disambiguate against.
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const gestureRef = useRef<null | {
+    id: string; startX: number; startY: number;
+    state: 'pending' | 'reordering' | 'cancelled';
+    longPressTimer: ReturnType<typeof setTimeout> | null;
+    initialIdx: number; rowHeight: number;
+  }>(null);
 
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
@@ -142,6 +154,102 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
     });
   }
 
+  // ── Long-press reorder ───────────────────────────────────────────────────
+  function setRowTransform(id: string, value: string, options: { transition?: string } = {}) {
+    const el = rowRefs.current.get(id);
+    if (!el) return;
+    if (options.transition !== undefined) el.style.transition = options.transition;
+    el.style.transform = value;
+  }
+
+  function enterReorderMode(id: string, pointerId: number) {
+    const g = gestureRef.current;
+    if (!g || g.state !== 'pending' || g.id !== id) return;
+    g.state = 'reordering';
+    g.longPressTimer = null;
+    const el = rowRefs.current.get(id);
+    if (!el) return;
+    el.setPointerCapture(pointerId);
+    setRowTransform(id, 'translateY(0) scale(1.02)', { transition: 'none' });
+    el.classList.add('reordering');
+    setDraggedId(id);
+    setDropIndex(g.initialIdx);
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try { navigator.vibrate(15); } catch { /* ignore */ }
+    }
+  }
+
+  function onRowPointerDown(e: React.PointerEvent<HTMLDivElement>, id: string, idx: number) {
+    // Don't capture taps on the check/× buttons or while editing — let them register.
+    if ((e.target as HTMLElement).closest('[data-no-drag]')) return;
+    if (editingId) return;
+    const rowEl = rowRefs.current.get(id);
+    if (!rowEl) return;
+    const pointerId = e.pointerId;
+    const longPressTimer = setTimeout(() => enterReorderMode(id, pointerId), 320);
+    gestureRef.current = {
+      id, startX: e.clientX, startY: e.clientY,
+      state: 'pending',
+      longPressTimer,
+      initialIdx: idx,
+      rowHeight: rowEl.getBoundingClientRect().height,
+    };
+  }
+
+  function onRowPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const g = gestureRef.current;
+    if (!g) return;
+    const dy = e.clientY - g.startY;
+    const dx = e.clientX - g.startX;
+
+    if (g.state === 'pending') {
+      // Any meaningful movement before the long-press timer fires kills the drag —
+      // user is probably scrolling or about to tap precisely.
+      if (Math.abs(dy) > 8 || Math.abs(dx) > 8) {
+        if (g.longPressTimer) { clearTimeout(g.longPressTimer); g.longPressTimer = null; }
+        g.state = 'cancelled';
+      }
+      return;
+    }
+
+    if (g.state === 'reordering') {
+      setRowTransform(g.id, `translateY(${dy}px) scale(1.02)`);
+      const slotShift = Math.round(dy / Math.max(1, g.rowHeight));
+      const targetIdx = Math.max(0, Math.min(goals.length - 1, g.initialIdx + slotShift));
+      setDropIndex(prev => prev === targetIdx ? prev : targetIdx);
+    }
+  }
+
+  function onRowPointerUp() {
+    const g = gestureRef.current;
+    if (!g) return;
+    if (g.longPressTimer) { clearTimeout(g.longPressTimer); g.longPressTimer = null; }
+    if (g.state === 'reordering') {
+      const el = rowRefs.current.get(g.id);
+      if (el) {
+        el.classList.remove('reordering');
+        el.style.transition = '';
+        el.style.transform = '';
+      }
+      const target = dropIndex ?? g.initialIdx;
+      if (target !== g.initialIdx) commitReorder(g.id, g.initialIdx, target);
+      setDraggedId(null);
+      setDropIndex(null);
+    }
+    gestureRef.current = null;
+  }
+
+  async function commitReorder(_id: string, from: number, to: number) {
+    const next = [...goals];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setGoals(next.map((g, i) => ({ ...g, position: i })));
+    await Promise.all(next.map((g, i) => fetch(`/api/goals/${g.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ position: i }),
+    })));
+  }
+
   if (loading) return null;
 
   const done = goals.filter(g => g.done).length;
@@ -150,8 +258,12 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
   return (
     <div className="card" style={{ marginBottom: 22 }}>
       <style>{`
-        .dg-row { display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid rgba(255,255,255,0.04); }
+        .dg-row { position: relative; display:flex; align-items:center; gap:10px; padding:9px 6px; border-bottom:1px solid rgba(255,255,255,0.04); border-radius: 8px; transition: transform 220ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms ease; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+        .dg-row:active { cursor: grabbing; }
         .dg-row:last-of-type { border-bottom:none; }
+        .dg-row.reordering { z-index: 20; box-shadow: 0 12px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08); background: rgba(20,20,22,1); border-color: transparent; cursor: grabbing; }
+        .dg-drop-indicator { height: 0; border-top: 2px solid var(--success); margin: 2px 8px; border-radius: 1px; pointer-events: none; box-shadow: 0 0 8px rgba(107,227,164,0.4); animation: dg-drop-pulse 1.2s ease-in-out infinite; }
+        @keyframes dg-drop-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
         .dg-check { width:22px; height:22px; border-radius:7px; border:1px solid rgba(255,255,255,0.12); background:transparent; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:all 0.15s; }
         .dg-check.done { background:rgba(107,227,164,0.15); border-color:var(--success); }
         .dg-text { flex:1; font-size:14px; color:var(--text-primary); line-height:1.4; cursor:text; }
@@ -170,42 +282,59 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
         )}
       </div>
 
-      {goals.map(g => {
+      {goals.map((g, idx) => {
         const isEditing = editingId === g.id;
+        const isDraggedRow = draggedId === g.id;
+        const indicatorBefore = draggedId !== null && dropIndex === idx && dropIndex !== goals.findIndex(x => x.id === draggedId);
         return (
-          <div key={g.id} className="dg-row">
-            <button
-              className={`dg-check${g.done ? ' done' : ''}`}
-              onClick={() => toggleDone(g)}
-              aria-label={g.done ? 'Mark not done' : 'Mark done'}
+          <Fragment key={g.id}>
+            {indicatorBefore && <div className="dg-drop-indicator" />}
+            <div
+              ref={el => { if (el) rowRefs.current.set(g.id, el); else rowRefs.current.delete(g.id); }}
+              className={`dg-row${isDraggedRow ? ' reordering' : ''}`}
+              onPointerDown={e => onRowPointerDown(e, g.id, idx)}
+              onPointerMove={onRowPointerMove}
+              onPointerUp={onRowPointerUp}
+              onPointerCancel={onRowPointerUp}
             >
-              {g.done && (
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M2 6.5L5.2 9.5L11 3.5" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              )}
-            </button>
-            {isEditing ? (
-              <input
-                className="dg-input"
-                value={editText}
-                onChange={e => setEditText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') saveEdit(g.id); if (e.key === 'Escape') setEditingId(null); }}
-                onBlur={() => saveEdit(g.id)}
-                autoFocus
-              />
-            ) : (
-              <span
-                className={`dg-text${g.done ? ' done' : ''}`}
-                onClick={() => { setEditingId(g.id); setEditText(g.text); }}
+              <button
+                data-no-drag
+                className={`dg-check${g.done ? ' done' : ''}`}
+                onClick={() => toggleDone(g)}
+                aria-label={g.done ? 'Mark not done' : 'Mark done'}
               >
-                {g.text}
-              </span>
-            )}
-            <button className="dg-del" onClick={() => deleteGoal(g.id)} aria-label="Delete goal">×</button>
-          </div>
+                {g.done && (
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <path d="M2 6.5L5.2 9.5L11 3.5" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </button>
+              {isEditing ? (
+                <input
+                  data-no-drag
+                  className="dg-input"
+                  value={editText}
+                  onChange={e => setEditText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveEdit(g.id); if (e.key === 'Escape') setEditingId(null); }}
+                  onBlur={() => saveEdit(g.id)}
+                  autoFocus
+                />
+              ) : (
+                <span
+                  className={`dg-text${g.done ? ' done' : ''}`}
+                  onClick={() => { setEditingId(g.id); setEditText(g.text); }}
+                >
+                  {g.text}
+                </span>
+              )}
+              <button data-no-drag className="dg-del" onClick={() => deleteGoal(g.id)} aria-label="Delete goal">×</button>
+            </div>
+          </Fragment>
         );
       })}
+      {draggedId !== null && dropIndex === goals.length && dropIndex !== goals.findIndex(x => x.id === draggedId) && (
+        <div className="dg-drop-indicator" />
+      )}
 
       {total === 0 && !adding && (
         <div style={{ fontSize:13, color:'var(--text-tertiary)', padding:'4px 0 8px' }}>

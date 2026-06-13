@@ -199,6 +199,13 @@ CREATE TABLE IF NOT EXISTS urge_surfs (
 );
 CREATE INDEX IF NOT EXISTS urge_surfs_at_idx ON urge_surfs(surfed_at DESC);
 
+-- Whether this urge entry counts as a crisis-level moment (i.e. an "I made it"
+-- log from Crisis Mode, OR a normal urge the user later marked as crisis).
+-- One-time backfill from the legacy [crisis-mode] note prefix:
+--   ALTER TABLE recovery_urges ADD COLUMN IF NOT EXISTS is_crisis BOOLEAN NOT NULL DEFAULT false;
+--   UPDATE recovery_urges SET is_crisis = true WHERE note LIKE '[crisis-mode]%';
+ALTER TABLE recovery_urges ADD COLUMN IF NOT EXISTS is_crisis BOOLEAN NOT NULL DEFAULT false;
+
 -- Tags on each urge log entry. Replaces the older split between `halt` (4 fixed
 -- codes) and `triggers` (5 categorical labels) — everything's now one free-form
 -- tag bag, with personalized suggestions surfaced in the UI.

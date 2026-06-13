@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
     intensity: Number(body.intensity),
     note: body.note ?? '',
     tags: [...tags],
+    is_crisis: body.is_crisis === true,
   }).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data, { status: 201 });
