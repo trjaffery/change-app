@@ -28,7 +28,7 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     sb.from('habit_completions').select('habit_id, date, count').gte('date', sevenAgo).lte('date', todayStr),
     sb.from('splits').select('name, split_days(name, day_of_week, split_exercises(exercise, target_sets, target_reps))').eq('is_active', true).limit(1),
     sb.from('recovery_settings').select('key, value'),
-    sb.from('recovery_urges').select('intensity, note, triggers, created_at').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
+    sb.from('recovery_urges').select('intensity, note, tags, created_at').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
     sb.from('recovery_urges').select('intensity, note, created_at').order('created_at', { ascending: false }).limit(5),
     sb.from('goals').select('text, done').eq('date', todayStr),
     sb.from('goals').select('date, text, done').gte('date', sevenAgo).lte('date', todayStr),
@@ -102,15 +102,15 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     ? 'No urges logged in the last 7 days.'
     : `${urgeCount} urges logged in the last 7 days, avg intensity ${avgIntensity}/5.`;
 
-  // Trigger tag distribution.
-  const triggerCounts: Record<string, number> = {};
+  // Tag distribution.
+  const tagCounts: Record<string, number> = {};
   for (const u of urges) {
-    for (const t of ((u as { triggers?: string[] }).triggers ?? [])) {
-      triggerCounts[t] = (triggerCounts[t] ?? 0) + 1;
+    for (const t of ((u as { tags?: string[] }).tags ?? [])) {
+      tagCounts[t] = (tagCounts[t] ?? 0) + 1;
     }
   }
-  const triggerLine = Object.keys(triggerCounts).length
-    ? `Trigger tags this week: ${Object.entries(triggerCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${t} (${c})`).join(', ')}.`
+  const triggerLine = Object.keys(tagCounts).length
+    ? `Tags this week: ${Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${t} (${c})`).join(', ')}.`
     : '';
 
   // Recent urge notes (verbatim, last 5 ever — not just this week).

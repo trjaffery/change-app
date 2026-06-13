@@ -115,14 +115,17 @@ export default function CrisisMode({
     if (logging) return;
     setLogging(true);
     try {
+      // Expand HALT codes to their human labels so they merge with the rest of
+      // the user's tag vocabulary in the unified `tags` column.
+      const haltLabel: Record<string, string> = { H: 'Hungry', A: 'Angry', L: 'Lonely', T: 'Tired' };
+      const tags = [...halt].map(c => haltLabel[c] ?? c).filter(Boolean);
       await fetch('/api/recovery/urges', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           intensity: Math.max(1, Math.min(5, Math.round(intensityOut / 2))),
           note: `[crisis-mode] started ${intensityIn}/10 → ended ${intensityOut}/10`,
-          triggers: [],
-          halt: [...halt],
+          tags,
         }),
       });
     } finally {

@@ -8,7 +8,6 @@ interface Insights { observations: Observation[]; plan_suggestions: PlanSuggesti
 interface CacheRow { urge_count: number; surf_count: number; generated_at: string; insights: Insights | Record<string, never> }
 
 const STOPWORDS = new Set(['i', 'a', 'the', 'and', 'or', 'but', 'to', 'of', 'in', 'it', 'was', 'is', 'my', 'me', 'had', 'at', 'so', 'just', 'an', 'for', 'on', 'with', 'that', 'this', 'felt', 'feel']);
-const HALT_LABELS: Record<string, string> = { H: 'Hungry', A: 'Angry', L: 'Lonely', T: 'Tired' };
 
 // GET — return cached insights + a staleness flag the client can use to decide
 // whether to background-trigger a regen. Stale = current totals differ from
@@ -44,14 +43,14 @@ export async function POST() {
     const sb = supabaseServer();
     const thirtyAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
     const [urgesRes, surfsRes, settingsRes, diaryRes, planRes] = await Promise.all([
-      sb.from('recovery_urges').select('intensity, note, triggers, halt, created_at').order('created_at', { ascending: true }),
+      sb.from('recovery_urges').select('intensity, note, tags, created_at').order('created_at', { ascending: true }),
       sb.from('urge_surfs').select('completed_seconds, full_completion, surfed_at').order('surfed_at', { ascending: true }),
       sb.from('recovery_settings').select('key, value'),
       sb.from('diary_entries').select('date, body, mood').gte('date', thirtyAgo).order('date', { ascending: false }),
       sb.from('rp_plan').select('triggers, warning_signs, replacement_behaviors, why').eq('id', 1).maybeSingle(),
     ]);
 
-    const urges = (urgesRes.data ?? []) as Array<{ intensity: number; note: string | null; triggers: string[] | null; halt: string[] | null; created_at: string }>;
+    const urges = (urgesRes.data ?? []) as Array<{ intensity: number; note: string | null; tags: string[] | null; created_at: string }>;
     const surfs = (surfsRes.data ?? []) as Array<{ completed_seconds: number; full_completion: boolean; surfed_at: string }>;
     const settings: Record<string, string> = {};
     for (const s of settingsRes.data ?? []) settings[s.key] = s.value;
@@ -73,8 +72,7 @@ export async function POST() {
     const timeCounts = { Morning: 0, Afternoon: 0, Evening: 0, Night: 0 };
     let intensitySum = 0;
     const wordFreq: Record<string, number> = {};
-    const triggerStats: Record<string, { count: number; intensitySum: number }> = {};
-    const haltStats: Record<string, { count: number; intensitySum: number }> = {};
+    const tagStats: Record<string, { count: number; intensitySum: number }> = {};
 
     for (const u of urges) {
       const d = new Date(u.created_at);
@@ -85,15 +83,10 @@ export async function POST() {
       else if (h >= 18 && h < 22) timeCounts.Evening++;
       else timeCounts.Night++;
       intensitySum += u.intensity;
-      for (const t of (u.triggers ?? [])) {
-        triggerStats[t] = triggerStats[t] ?? { count: 0, intensitySum: 0 };
-        triggerStats[t].count++;
-        triggerStats[t].intensitySum += u.intensity;
-      }
-      for (const code of (u.halt ?? [])) {
-        haltStats[code] = haltStats[code] ?? { count: 0, intensitySum: 0 };
-        haltStats[code].count++;
-        haltStats[code].intensitySum += u.intensity;
+      for (const t of (u.tags ?? [])) {
+        tagStats[t] = tagStats[t] ?? { count: 0, intensitySum: 0 };
+        tagStats[t].count++;
+        tagStats[t].intensitySum += u.intensity;
       }
       if (u.note) {
         for (const word of u.note.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/)) {
@@ -116,15 +109,13 @@ export async function POST() {
     const last7Avg = last7Urges.length ? (last7Urges.reduce((s, u) => s + u.intensity, 0) / last7Urges.length).toFixed(2) : '—';
     const prior7Avg = prior7Urges.length ? (prior7Urges.reduce((s, u) => s + u.intensity, 0) / prior7Urges.length).toFixed(2) : '—';
 
-    const haltLines = Object.entries(haltStats)
+    // Tag lines ranked by HARM (avg intensity) with a min-count guard, so the
+    // prompt foregrounds tags that hurt rather than tags that just show up often.
+    const tagLines = Object.entries(tagStats)
       .filter(([, v]) => v.count >= 2)
       .sort((a, b) => (b[1].intensitySum / b[1].count) - (a[1].intensitySum / a[1].count))
-      .map(([code, v]) => `${HALT_LABELS[code] ?? code}: ${v.count} urges, avg intensity ${(v.intensitySum / v.count).toFixed(2)} (vs overall ${avgIntensity.toFixed(2)})`);
-
-    const triggerLines = Object.entries(triggerStats)
-      .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 6)
-      .map(([t, v]) => `${t}: ${v.count} urges, avg intensity ${(v.intensitySum / v.count).toFixed(2)}`);
+      .slice(0, 8)
+      .map(([t, v]) => `${t}: ${v.count} urges, avg intensity ${(v.intensitySum / v.count).toFixed(2)} (vs overall ${avgIntensity.toFixed(2)})`);
 
     const completedSurfs = surfs.filter(s => s.full_completion).length;
     const surfRate = surfs.length ? `${completedSurfs}/${surfs.length} (${Math.round((completedSurfs / surfs.length) * 100)}%)` : 'no surf attempts logged';
@@ -158,11 +149,8 @@ URGE TOTALS
 - Day-of-week counts: ${DAYS.map((d, i) => `${d} ${dowCounts[i]}`).join(', ')}
 - Time-of-day counts: Morning ${timeCounts.Morning}, Afternoon ${timeCounts.Afternoon}, Evening ${timeCounts.Evening}, Night ${timeCounts.Night}
 
-HALT STATE IMPACT (only states with ≥2 logged occurrences)
-${haltLines.length ? haltLines.map(l => `- ${l}`).join('\n') : '- (no HALT data yet)'}
-
-TRIGGER IMPACT (top 6 by count)
-${triggerLines.length ? triggerLines.map(l => `- ${l}`).join('\n') : '- (no triggers tagged)'}
+TAG IMPACT (ranked by avg intensity, min 2 occurrences — these are the tags doing the most harm)
+${tagLines.length ? tagLines.map(l => `- ${l}`).join('\n') : '- (no tags logged yet)'}
 
 URGE SURF SUCCESS
 - Full completion rate: ${surfRate}

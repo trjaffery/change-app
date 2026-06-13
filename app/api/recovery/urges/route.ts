@@ -26,14 +26,21 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { intensity, note, triggers, halt } = await req.json();
-  if (!intensity) return NextResponse.json({ error: 'intensity required' }, { status: 400 });
+  const body = await req.json();
+  if (!body.intensity) return NextResponse.json({ error: 'intensity required' }, { status: 400 });
+  // Accept either `tags` (new) or legacy `triggers`/`halt` and merge them. Legacy
+  // halt codes are expanded to their full labels so historic callers still work.
+  const HALT_LABEL: Record<string, string> = { H: 'Hungry', A: 'Angry', L: 'Lonely', T: 'Tired' };
+  const tags = new Set<string>();
+  for (const t of (Array.isArray(body.tags) ? body.tags : [])) if (typeof t === 'string' && t.trim()) tags.add(t.trim());
+  for (const t of (Array.isArray(body.triggers) ? body.triggers : [])) if (typeof t === 'string' && t.trim()) tags.add(t.trim());
+  for (const c of (Array.isArray(body.halt) ? body.halt : [])) if (typeof c === 'string' && HALT_LABEL[c]) tags.add(HALT_LABEL[c]);
+
   const db = supabaseServer();
   const { data, error } = await db.from('recovery_urges').insert({
-    intensity: Number(intensity),
-    note: note ?? '',
-    triggers: triggers ?? [],
-    halt: Array.isArray(halt) ? halt : [],
+    intensity: Number(body.intensity),
+    note: body.note ?? '',
+    tags: [...tags],
   }).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data, { status: 201 });

@@ -2,16 +2,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Minus, Sparkles } from 'lucide-react';
 
-interface HaltImpact { code: string; label: string; count: number; avg_intensity: number; delta_vs_overall: number }
-interface TriggerImpact { name: string; count: number; avg_intensity: number }
+interface TagImpact { name: string; count: number; avg_intensity: number; delta_vs_overall: number }
 interface HotTime { day: string; bucket: string; count: number }
 interface DailyPoint { date: string; count: number }
 interface Stats {
   totals: { urges: number; surfs: number; urges_last30: number };
   window: { last_count: number; prior_count: number; last_avg_intensity: number | null; prior_avg_intensity: number | null; last_surfs: number; prior_surfs: number };
   overall_avg_intensity: number;
-  halt_impact: HaltImpact[];
-  triggers: TriggerImpact[];
+  tags_by_harm: TagImpact[];
+  tags_by_frequency: TagImpact[];
   hot_times: HotTime[];
   surf: { total: number; completed: number; completion_rate: number | null };
   daily_30d: DailyPoint[];
@@ -112,10 +111,10 @@ export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
     return <div className="card" style={{ marginBottom: 22, minHeight: 240 }} />;
   }
 
-  const { totals, window: w, halt_impact, triggers, hot_times, surf, daily_30d, overall_avg_intensity } = stats;
+  const { totals, window: w, tags_by_harm, tags_by_frequency, hot_times, surf, daily_30d, overall_avg_intensity } = stats;
   const maxDaily = Math.max(...daily_30d.map(d => d.count), 1);
-  const maxHaltCount = Math.max(...halt_impact.map(h => h.count), 1);
-  const maxTrigCount = Math.max(...triggers.map(t => t.count), 1);
+  const maxHarmAvg = Math.max(...tags_by_harm.map(t => t.avg_intensity), 1);
+  const maxFreqCount = Math.max(...tags_by_frequency.map(t => t.count), 1);
 
   const countDelta = pctDelta(w.last_count, w.prior_count);
   const intensityDelta = pctDelta(w.last_avg_intensity, w.prior_avg_intensity);
@@ -272,20 +271,20 @@ export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
         </div>
       </div>
 
-      {/* ── HALT impact ───────────────────────────────────────────────── */}
+      {/* ── Tags doing the most harm (avg intensity) ─────────────────── */}
       <div className="up-section">
-        <div className="up-label">HALT impact <span>{halt_impact.length ? `avg ${overall_avg_intensity.toFixed(1)} overall` : ''}</span></div>
-        {halt_impact.length === 0 && (
-          <div className="up-empty">Tap a HALT toggle on at least 2 urges to see which states drive your worst urges.</div>
+        <div className="up-label">Worst by harm <span>{tags_by_harm.length ? `avg ${overall_avg_intensity.toFixed(1)} overall` : ''}</span></div>
+        {tags_by_harm.length === 0 && (
+          <div className="up-empty">Tag at least two urges with the same word to see which tags hit hardest.</div>
         )}
-        {halt_impact.map(h => (
-          <div key={h.code} className="up-bar-row">
-            <div className="up-bar-name">{h.label}</div>
+        {tags_by_harm.map((t, i) => (
+          <div key={t.name} className="up-bar-row">
+            <div className="up-bar-name">{t.name}</div>
             <div className="up-bar-track">
-              <div className="up-bar-fill" style={{ width: `${(h.count / maxHaltCount) * 100}%` }} />
+              <div className="up-bar-fill" style={{ width: `${(t.avg_intensity / maxHarmAvg) * 100}%`, background: i === 0 ? 'rgba(255,107,107,0.55)' : undefined }} />
             </div>
             <div className="up-bar-meta">
-              {h.count}× · <span className={h.delta_vs_overall >= 0.4 ? 'hi' : ''}>avg {h.avg_intensity.toFixed(1)}</span>
+              {t.count}× · <span className={t.delta_vs_overall >= 0.4 ? 'hi' : ''}>avg {t.avg_intensity.toFixed(1)}</span>
             </div>
           </div>
         ))}
@@ -305,15 +304,15 @@ export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
         </div>
       )}
 
-      {/* ── Triggers ──────────────────────────────────────────────────── */}
-      {triggers.length > 0 && (
+      {/* ── Most frequent tags (raw count, separate from harm) ────────── */}
+      {tags_by_frequency.length > 0 && (
         <div className="up-section">
-          <div className="up-label">Triggers</div>
-          {triggers.map(t => (
+          <div className="up-label">Most logged</div>
+          {tags_by_frequency.map(t => (
             <div key={t.name} className="up-bar-row">
               <div className="up-bar-name">{t.name}</div>
               <div className="up-bar-track">
-                <div className="up-bar-fill" style={{ width: `${(t.count / maxTrigCount) * 100}%` }} />
+                <div className="up-bar-fill" style={{ width: `${(t.count / maxFreqCount) * 100}%` }} />
               </div>
               <div className="up-bar-meta">{t.count}× · avg {t.avg_intensity.toFixed(1)}</div>
             </div>

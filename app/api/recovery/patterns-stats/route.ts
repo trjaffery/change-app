@@ -7,7 +7,6 @@ import { supabaseServer } from '@/lib/supabase';
  * both these cards and the AI prompt in /api/ai/recovery-patterns.
  */
 
-const HALT_LABELS: Record<string, string> = { H: 'Hungry', A: 'Angry', L: 'Lonely', T: 'Tired' };
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function timeBucket(d: Date): 'Morning' | 'Afternoon' | 'Evening' | 'Night' {
@@ -21,10 +20,10 @@ function timeBucket(d: Date): 'Morning' | 'Afternoon' | 'Evening' | 'Night' {
 export async function GET() {
   const sb = supabaseServer();
   const [urgesRes, surfsRes] = await Promise.all([
-    sb.from('recovery_urges').select('intensity, triggers, halt, created_at').order('created_at', { ascending: false }),
+    sb.from('recovery_urges').select('intensity, tags, created_at').order('created_at', { ascending: false }),
     sb.from('urge_surfs').select('full_completion, completed_seconds, surfed_at').order('surfed_at', { ascending: false }),
   ]);
-  const urges = (urgesRes.data ?? []) as Array<{ intensity: number; triggers: string[] | null; halt: string[] | null; created_at: string }>;
+  const urges = (urgesRes.data ?? []) as Array<{ intensity: number; tags: string[] | null; created_at: string }>;
   const surfs = (surfsRes.data ?? []) as Array<{ full_completion: boolean; completed_seconds: number; surfed_at: string }>;
 
   const now = Date.now();
@@ -42,39 +41,30 @@ export async function GET() {
 
   const overallAvg = urges.length ? urges.reduce((s, u) => s + u.intensity, 0) / urges.length : 0;
 
-  // ── HALT impact (states with ≥2 occurrences, ordered by intensity desc) ─
-  const haltAgg: Record<string, { count: number; intensitySum: number }> = {};
+  // ── Tag impact (all tags, ranked by avg intensity = "harm") ─────────────
+  const tagAgg: Record<string, { count: number; intensitySum: number }> = {};
   for (const u of urges) {
-    for (const code of (u.halt ?? [])) {
-      haltAgg[code] = haltAgg[code] ?? { count: 0, intensitySum: 0 };
-      haltAgg[code].count++;
-      haltAgg[code].intensitySum += u.intensity;
+    for (const t of (u.tags ?? [])) {
+      tagAgg[t] = tagAgg[t] ?? { count: 0, intensitySum: 0 };
+      tagAgg[t].count++;
+      tagAgg[t].intensitySum += u.intensity;
     }
   }
-  const haltImpact = Object.entries(haltAgg)
-    .filter(([, v]) => v.count >= 2)
-    .map(([code, v]) => ({
-      code,
-      label: HALT_LABELS[code] ?? code,
-      count: v.count,
-      avg_intensity: v.intensitySum / v.count,
-      delta_vs_overall: (v.intensitySum / v.count) - overallAvg,
-    }))
-    .sort((a, b) => b.avg_intensity - a.avg_intensity);
-
-  // ── Triggers (top 5 by count) ───────────────────────────────────────────
-  const trigAgg: Record<string, { count: number; intensitySum: number }> = {};
-  for (const u of urges) {
-    for (const t of (u.triggers ?? [])) {
-      trigAgg[t] = trigAgg[t] ?? { count: 0, intensitySum: 0 };
-      trigAgg[t].count++;
-      trigAgg[t].intensitySum += u.intensity;
-    }
-  }
-  const triggers = Object.entries(trigAgg)
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 5)
-    .map(([name, v]) => ({ name, count: v.count, avg_intensity: v.intensitySum / v.count }));
+  // "Worst" tags: ranked by avg intensity. Min count guard so a one-off doesn't
+  // dominate. The frequency view is included separately so the UI can show both.
+  const allTags = Object.entries(tagAgg).map(([name, v]) => ({
+    name,
+    count: v.count,
+    avg_intensity: v.intensitySum / v.count,
+    delta_vs_overall: (v.intensitySum / v.count) - overallAvg,
+  }));
+  const worstByHarm = allTags
+    .filter(t => t.count >= 2)
+    .sort((a, b) => b.avg_intensity - a.avg_intensity || b.count - a.count)
+    .slice(0, 6);
+  const byFrequency = allTags
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
 
   // ── Hot times: day-of-week × time-bucket cross-tab; emit top 3 cells ────
   const cell: Record<string, number> = {};
@@ -117,8 +107,8 @@ export async function GET() {
       prior_surfs: prior7Surfs.length,
     },
     overall_avg_intensity: overallAvg,
-    halt_impact: haltImpact,
-    triggers,
+    tags_by_harm: worstByHarm,
+    tags_by_frequency: byFrequency,
     hot_times: hotTimes,
     surf: { total: surfs.length, completed: surfCompleted, completion_rate: surfRate },
     daily_30d: daily,

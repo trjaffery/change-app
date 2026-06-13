@@ -199,8 +199,20 @@ CREATE TABLE IF NOT EXISTS urge_surfs (
 );
 CREATE INDEX IF NOT EXISTS urge_surfs_at_idx ON urge_surfs(surfed_at DESC);
 
--- HALT state on each urge log entry
-ALTER TABLE recovery_urges ADD COLUMN IF NOT EXISTS halt TEXT[] DEFAULT '{}';
+-- Tags on each urge log entry. Replaces the older split between `halt` (4 fixed
+-- codes) and `triggers` (5 categorical labels) — everything's now one free-form
+-- tag bag, with personalized suggestions surfaced in the UI.
+-- One-time migration when upgrading from the old schema:
+--   UPDATE recovery_urges
+--   SET triggers = COALESCE(triggers, '{}') ||
+--     CASE WHEN 'H' = ANY(COALESCE(halt, '{}')) THEN ARRAY['Hungry']::TEXT[] ELSE '{}'::TEXT[] END ||
+--     CASE WHEN 'A' = ANY(COALESCE(halt, '{}')) THEN ARRAY['Angry']::TEXT[] ELSE '{}'::TEXT[] END ||
+--     CASE WHEN 'L' = ANY(COALESCE(halt, '{}')) THEN ARRAY['Lonely']::TEXT[] ELSE '{}'::TEXT[] END ||
+--     CASE WHEN 'T' = ANY(COALESCE(halt, '{}')) THEN ARRAY['Tired']::TEXT[] ELSE '{}'::TEXT[] END
+--   WHERE halt IS NOT NULL AND array_length(halt, 1) > 0;
+--   ALTER TABLE recovery_urges RENAME COLUMN triggers TO tags;
+--   ALTER TABLE recovery_urges DROP COLUMN halt;
+ALTER TABLE recovery_urges ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
 
 -- AI pattern-analysis cache (single row). Busted when the cached urge_count
 -- diverges from the current count — i.e. anything you log invalidates it.
