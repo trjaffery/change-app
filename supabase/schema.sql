@@ -201,3 +201,23 @@ CREATE INDEX IF NOT EXISTS urge_surfs_at_idx ON urge_surfs(surfed_at DESC);
 
 -- HALT state on each urge log entry
 ALTER TABLE recovery_urges ADD COLUMN IF NOT EXISTS halt TEXT[] DEFAULT '{}';
+
+-- AI pattern-analysis cache (single row). Busted when the cached urge_count
+-- diverges from the current count — i.e. anything you log invalidates it.
+CREATE TABLE IF NOT EXISTS rp_patterns_cache (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  urge_count INTEGER NOT NULL DEFAULT 0,
+  surf_count INTEGER NOT NULL DEFAULT 0,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  insights JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+INSERT INTO rp_patterns_cache(id) VALUES(1) ON CONFLICT DO NOTHING;
+
+-- Weekly review cache. Keyed by the week-start date (Sunday) so historical
+-- weeks remain queryable. Auto-populated on Sunday/Monday; manual regenerate
+-- overwrites the row.
+CREATE TABLE IF NOT EXISTS weekly_review_cache (
+  week_start DATE PRIMARY KEY,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  review JSONB NOT NULL
+);

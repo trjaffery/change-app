@@ -39,7 +39,7 @@ export default function PlayTheTape() {
   }
 
   return (
-    <div className="card" style={{ marginBottom: 22 }}>
+    <div id="play-the-tape-card" className="card" style={{ marginBottom: 22 }}>
       <div className="section-title">Play it forward</div>
       <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 12, lineHeight: 1.55 }}>
         Type the moment you&apos;re tempted by. The coach walks through the realistic next 24 hours — so the craving meets the morning after.

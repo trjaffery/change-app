@@ -1,8 +1,16 @@
 'use client';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { getActiveDateString } from '@/lib/dates';
+import { suggestNext } from '@/lib/gym-progression';
 import BottomSheet from '@/components/layout/BottomSheet';
 
+interface WorkoutSummary {
+  totals: { volume: number; sets: number; exercises: number; duration_minutes: number | null };
+  prs: { exercise: string; weight: number; reps: number; previous: number }[];
+  volume_delta_pct: number | null;
+  prior_avg_volume: number | null;
+  note: string | null;
+}
 interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string }
 interface GymSet { id: string; exercise: string; reps: number; weight: number }
 interface SetRow { reps: string; weight: string; loggedId: string | null }
@@ -60,6 +68,9 @@ export default function WorkoutSession({
   const [finishRpe, setFinishRpe] = useState<number | null>(null);
   const [finishNotes, setFinishNotes] = useState('');
   const [finishing, setFinishing] = useState(false);
+  // Post-workout summary sheet
+  const [summary, setSummary] = useState<WorkoutSummary | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
 
   // Create session record once — guard prevents StrictMode double-fire
   useEffect(() => {
@@ -190,6 +201,22 @@ export default function WorkoutSession({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      // Compute the post-workout summary. Deterministic totals + PRs are cheap;
+      // the AI note (optional) lives inside the same response.
+      try {
+        const sumRes = await fetch('/api/ai/workout-summary', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sid }),
+        });
+        if (sumRes.ok) {
+          const s = await sumRes.json() as WorkoutSummary;
+          setSummary(s);
+          setShowFinish(false);
+          setShowSummary(true);
+          setFinishing(false);
+          return;
+        }
+      } catch { /* fall through to onFinish */ }
     }
     onFinish();
   }
@@ -240,12 +267,12 @@ export default function WorkoutSession({
       setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, aiState: { label: '', response: 'No history yet.', loading: false } }));
       return;
     }
-    const data = await fetch('/api/ai/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exercise: block.exercise, sessions }) }).then(r => r.json());
+    const data = suggestNext(block.exercise, sessions, block.targetSets, block.targetReps);
     setBlocks(prev => prev.map((b, i) => i !== bi ? b : {
       ...b,
-      aiState: data.error
-        ? { label: '', response: data.error, loading: false }
-        : { label: `${data.sets} × ${data.reps} @ ${data.weight} lbs`, response: data.notes, loading: false },
+      aiState: data
+        ? { label: `${data.sets} × ${data.reps} @ ${data.weight} lbs`, response: data.notes, loading: false }
+        : { label: '', response: 'No history yet.', loading: false },
     }));
   }
 
@@ -662,6 +689,50 @@ export default function WorkoutSession({
         </div>
       </BottomSheet>
 
+      {/* Post-workout summary — deterministic totals + optional AI calibration note */}
+      <BottomSheet
+        open={showSummary}
+        onClose={() => { setShowSummary(false); onFinish(); }}
+        title="Session done"
+      >
+        {summary && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <SummaryStat label="Volume" value={`${summary.totals.volume.toLocaleString()}`} unit="lb-reps" />
+              <SummaryStat label="Sets" value={`${summary.totals.sets}`} unit={`${summary.totals.exercises} ex`} />
+              <SummaryStat label="Duration" value={summary.totals.duration_minutes !== null ? `${summary.totals.duration_minutes}` : '—'} unit="min" />
+            </div>
+
+            {summary.volume_delta_pct !== null && (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.08em' }}>
+                {summary.volume_delta_pct >= 0 ? '+' : ''}{summary.volume_delta_pct.toFixed(0)}% vs your last 3 of this day
+              </div>
+            )}
+
+            {summary.prs.length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--success)', marginBottom: 8 }}>New PRs</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {summary.prs.map((p, i) => (
+                    <span key={i} style={{ fontSize: 12, padding: '5px 10px', borderRadius: 14, background: 'rgba(107,227,164,0.1)', border: '1px solid rgba(107,227,164,0.25)', color: 'var(--success)' }}>
+                      {p.exercise} {p.weight} lb (prev {p.previous})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {summary.note && (
+              <div style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.025)', borderLeft: '2px solid var(--success)', fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+                {summary.note}
+              </div>
+            )}
+
+            <button className="btn-primary" style={{ width: '100%', fontSize: 14, padding: '12px 18px' }} onClick={() => { setShowSummary(false); onFinish(); }}>Done</button>
+          </div>
+        )}
+      </BottomSheet>
+
       {/* Exercise sections — flat, dense, mono-driven */}
       {blocks.map((block, bi) => {
         // Index of the first un-logged row in this block; that's the "active" set.
@@ -782,5 +853,15 @@ export default function WorkoutSession({
         <button onClick={addFreeExercise} aria-label="Add exercise">+</button>
       </div>
     </>
+  );
+}
+
+function SummaryStat({ label, value, unit }: { label: string; value: string; unit: string }) {
+  return (
+    <div style={{ padding: '12px 10px', borderRadius: 12, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-tertiary)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{value}</div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-tertiary)', marginTop: 4, letterSpacing: '0.08em' }}>{unit}</div>
+    </div>
   );
 }

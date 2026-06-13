@@ -3,7 +3,7 @@ import { supabaseServer } from '@/lib/supabase';
 
 // GET /api/recovery/urges?limit=10&offset=0
 //   - Defaults: limit=100, offset=0 (matches the old hard cap so existing
-//     callers — CheckIn, UrgePatterns — keep working unchanged).
+//     callers keep working unchanged).
 //   - Returns the rows as a plain JSON array.
 //   - Sets `X-Total-Count` so paginated callers can show "X of N" without
 //     a second roundtrip.

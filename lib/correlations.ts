@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export interface Correlation {
   id: string;
   finding: string;
+  action?: string; // one short next-move sentence, ≤14 words
   strength: 'strong' | 'moderate' | 'weak';
   samples: { a: number; b: number };
   confidence: 'high' | 'low';
@@ -20,6 +21,7 @@ interface DailyRecord {
   habitMet: Set<string>; // habit_ids whose daily count met goal_value that day
   goalsDone: number;
   goalsTotal: number;
+  mood: number | null; // 1..5 from diary; null when not tagged that day
   dow: number; // 0=Sun..6=Sat
 }
 
@@ -118,7 +120,7 @@ function slope(xs: number[], ys: number[]): number {
 // A day is "active" if the user did literally anything that day. Inactive days
 // would otherwise anchor a bucket at 0 and produce phantom "strong" findings.
 function isActive(r: DailyRecord): boolean {
-  return r.habitDone > 0 || r.workedOut || r.urgeCount > 0 || r.relapsed || r.goalsTotal > 0;
+  return r.habitDone > 0 || r.workedOut || r.urgeCount > 0 || r.relapsed || r.goalsTotal > 0 || r.mood !== null;
 }
 
 const DOW_NAMES = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
@@ -128,7 +130,7 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
   const startStr = utcDate(new Date(now - (windowDays - 1) * 86400000));
   const startIso = new Date(now - (windowDays - 1) * 86400000).toISOString();
 
-  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, relapsesRes, goalsRes] = await Promise.all([
+  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, relapsesRes, goalsRes, diaryRes] = await Promise.all([
     sb.from('habits').select('id, name, schedule_type, schedule_days, goal_value, goal_period').is('archived_at', null),
     sb.from('habit_completions').select('habit_id, date, count').gte('date', startStr),
     sb.from('gym_sessions').select('date').gte('date', startStr),
@@ -136,6 +138,7 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
     sb.from('recovery_urges').select('intensity, created_at').gte('created_at', startIso),
     sb.from('recovery_relapses').select('created_at').gte('created_at', startIso),
     sb.from('goals').select('date, done').gte('date', startStr),
+    sb.from('diary_entries').select('date, mood').gte('date', startStr).not('mood', 'is', null),
   ]);
 
   const habits = (habitsRes.data ?? []) as {
@@ -161,6 +164,7 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
       habitMet: new Set<string>(),
       goalsDone: 0,
       goalsTotal: 0,
+      mood: null,
       dow: d.getUTCDay(),
     });
   }
@@ -222,6 +226,11 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
     if (g.done) r.goalsDone += 1;
   }
 
+  for (const d of (diaryRes.data ?? []) as { date: string; mood: number | null }[]) {
+    const r = records.get(d.date);
+    if (r && d.mood !== null) r.mood = d.mood;
+  }
+
   // ---------- Filter to ACTIVE days only ----------
   const all = [...records.values()].sort((a, b) => a.date.localeCompare(b.date));
   const active = all.filter(isActive);
@@ -236,7 +245,7 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
     daysA: DailyRecord[];
     daysB: DailyRecord[];
     metric: (r: DailyRecord) => number | null;
-    format: (mA: number, mB: number, nA: number, nB: number) => string;
+    format: (mA: number, mB: number, nA: number, nB: number) => { finding: string; action?: string };
   }) {
     const valsA = opts.daysA.map(opts.metric).filter((v): v is number => v !== null);
     const valsB = opts.daysB.map(opts.metric).filter((v): v is number => v !== null);
@@ -249,9 +258,11 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
     const d = cohensD(valsA, valsB);
     const strength = strengthFromD(d);
     if (!strength) return;
+    const { finding, action } = opts.format(mA, mB, valsA.length, valsB.length);
     candidates.push({
       id: opts.id,
-      finding: opts.format(mA, mB, valsA.length, valsB.length),
+      finding,
+      action,
       strength,
       samples: { a: valsA.length, b: valsB.length },
       confidence: 'high',
@@ -265,8 +276,14 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
     daysB: active.filter(r => !r.workedOut),
     metric: r => r.urgeCount,
     format: (a, b) => a < b
-      ? `You log fewer urges on workout days (avg ${a.toFixed(1)}/day) than on rest days (avg ${b.toFixed(1)}/day).`
-      : `You log more urges on workout days (avg ${a.toFixed(1)}/day) than on rest days (avg ${b.toFixed(1)}/day).`,
+      ? {
+          finding: `Workout days log fewer urges — avg ${a.toFixed(1)}/day vs ${b.toFixed(1)} on rest days.`,
+          action: 'Lean into a workout when you feel an urge brewing.',
+        }
+      : {
+          finding: `Workout days log more urges — avg ${a.toFixed(1)}/day vs ${b.toFixed(1)} on rest days.`,
+          action: 'Treat post-workout windows as sensitive — plan a wind-down ritual.',
+        },
   });
 
   // ---------- 2. Habit completion rate vs urge count (continuous, Pearson) ----------
@@ -281,8 +298,11 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
         candidates.push({
           id: 'urges-vs-habits-pearson',
           finding: r < 0
-            ? `As your daily habit completion rises, urges tend to fall (r = ${r.toFixed(2)} across ${usable.length} active days).`
-            : `As your daily habit completion rises, urges tend to rise too (r = ${r.toFixed(2)} across ${usable.length} active days).`,
+            ? `Higher daily habit completion lines up with fewer urges (r = ${r.toFixed(2)}, ${usable.length} active days).`
+            : `Higher daily habit completion lines up with more urges (r = ${r.toFixed(2)}, ${usable.length} active days).`,
+          action: r < 0
+            ? 'Hit the morning habits first — they\'re your leading indicator.'
+            : 'Check whether a specific habit is fronting for stress — investigate which one.',
           strength,
           samples: { a: usable.length, b: usable.length },
           confidence: 'high',
@@ -302,8 +322,14 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
       daysB: missedDays,
       metric: r => r.urgeCount,
       format: (a, b) => a < b
-        ? `On days you hit "${h.name}", urges average ${a.toFixed(1)} vs ${b.toFixed(1)} on days you don't.`
-        : `On days you hit "${h.name}", urges average ${a.toFixed(1)} vs ${b.toFixed(1)} on days you don't (higher — note this).`,
+        ? {
+            finding: `Days you hit "${h.name}" average ${a.toFixed(1)} urges vs ${b.toFixed(1)} on days you don't.`,
+            action: `Protect "${h.name}" — it's a high-leverage habit for you.`,
+          }
+        : {
+            finding: `Days you hit "${h.name}" actually run higher: ${a.toFixed(1)} urges vs ${b.toFixed(1)}.`,
+            action: `Worth investigating "${h.name}" — is it covering for a hard day?`,
+          },
     });
   }
 
@@ -328,7 +354,10 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
           id: 'urge-intensity-trend',
           finding: direction === 'down'
             ? `Urge intensity is trending down — earlier avg ${firstAvg.toFixed(1)}/5 vs recent ${secondAvg.toFixed(1)}/5.`
-            : `Urge intensity is trending up — earlier avg ${firstAvg.toFixed(1)}/5 vs recent ${secondAvg.toFixed(1)}/5 (worth flagging).`,
+            : `Urge intensity is trending up — earlier avg ${firstAvg.toFixed(1)}/5 vs recent ${secondAvg.toFixed(1)}/5.`,
+          action: direction === 'down'
+            ? 'Same playbook — what you\'re doing is working.'
+            : 'Review the last 2 weeks of triggers — something shifted.',
           strength,
           samples: { a: firstHalf.length, b: secondHalf.length },
           confidence: 'high',
@@ -364,7 +393,8 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
         const strength: Correlation['strength'] = peakRatio >= 2.5 ? 'strong' : peakRatio >= 2 ? 'moderate' : 'weak';
         candidates.push({
           id: 'urges-by-dow',
-          finding: `Urges cluster on ${DOW_NAMES[peakDow]} — ${urgesByDow[peakDow]} of ${totalUrges} total this window (${peakRatio.toFixed(1)}× your average day).`,
+          finding: `Urges cluster on ${DOW_NAMES[peakDow]} — ${urgesByDow[peakDow]} of ${totalUrges} this window (${peakRatio.toFixed(1)}× your average day).`,
+          action: `Pre-plan one specific recovery move for ${DOW_NAMES[peakDow]}.`,
           strength,
           samples: { a: activeByDow[peakDow], b: active.length - activeByDow[peakDow] },
           confidence: 'high',
@@ -397,8 +427,11 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
           candidates.push({
             id: 'urges-day-after-gym',
             finding: mA < mB
-              ? `The day after a workout you log fewer urges (avg ${mA.toFixed(1)}) than the day after a rest day (avg ${mB.toFixed(1)}).`
-              : `The day after a workout you log more urges (avg ${mA.toFixed(1)}) than the day after a rest day (avg ${mB.toFixed(1)}).`,
+              ? `Day after a workout averages ${mA.toFixed(1)} urges vs ${mB.toFixed(1)} after a rest day.`
+              : `Day after a workout averages ${mA.toFixed(1)} urges vs ${mB.toFixed(1)} after a rest day.`,
+            action: mA < mB
+              ? 'Schedule workouts the day before your high-risk windows.'
+              : 'Watch the post-workout window — recovery + rest matter.',
             strength,
             samples: { a: afterGym.length, b: afterRest.length },
             confidence: 'high',
@@ -408,9 +441,76 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
     }
   }
 
+  // ---------- 7. Mood ↔ urges (continuous, Pearson) ----------
+  {
+    const usable = active.filter(r => r.mood !== null);
+    if (usable.length >= MIN_SAMPLES * 2) {
+      const xs = usable.map(r => r.mood!);
+      const ys = usable.map(r => r.urgeCount);
+      const r = pearson(xs, ys);
+      const strength = strengthFromR(r);
+      if (strength) {
+        candidates.push({
+          id: 'urges-vs-mood-pearson',
+          finding: r < 0
+            ? `Higher-mood days run with fewer urges (r = ${r.toFixed(2)} across ${usable.length} mood-tagged days).`
+            : `Higher-mood days run with more urges (r = ${r.toFixed(2)} across ${usable.length} mood-tagged days).`,
+          action: r < 0
+            ? 'Mood drops are an early warning — log one when you notice the dip.'
+            : 'Worth investigating — what\'s the mood-driver on those days?',
+          strength,
+          samples: { a: usable.length, b: usable.length },
+          confidence: 'high',
+        });
+      }
+    }
+  }
+
+  // ---------- 8. Mood ↔ workout (binary Cohen's d on mood scores) ----------
+  pushBinary({
+    id: 'mood-vs-gym',
+    daysA: active.filter(r => r.workedOut && r.mood !== null),
+    daysB: active.filter(r => !r.workedOut && r.mood !== null),
+    metric: r => r.mood,
+    format: (a, b) => a > b
+      ? {
+          finding: `Workout days average mood ${a.toFixed(1)}/5 vs ${b.toFixed(1)}/5 on rest days.`,
+          action: 'Workouts are paying mood dividends — don\'t skip on hard days.',
+        }
+      : {
+          finding: `Workout days average mood ${a.toFixed(1)}/5 vs ${b.toFixed(1)}/5 on rest days.`,
+          action: 'Check what\'s draining you on workout days — sleep, soreness, schedule?',
+        },
+  });
+
+  // ---------- 9. Mood ↔ habit completion rate (continuous, Pearson) ----------
+  {
+    const usable = active.filter(r => r.mood !== null && r.habitDue > 0);
+    if (usable.length >= MIN_SAMPLES * 2) {
+      const xs = usable.map(r => r.habitDone / r.habitDue);
+      const ys = usable.map(r => r.mood!);
+      const r = pearson(xs, ys);
+      const strength = strengthFromR(r);
+      if (strength) {
+        candidates.push({
+          id: 'mood-vs-habits-pearson',
+          finding: r > 0
+            ? `Higher habit completion correlates with higher mood (r = ${r.toFixed(2)}, ${usable.length} days).`
+            : `Higher habit completion correlates with lower mood (r = ${r.toFixed(2)}, ${usable.length} days).`,
+          action: r > 0
+            ? 'Hit your first habit before noon — it sets the mood floor.'
+            : 'Check whether habit pressure is the cost — consider trimming the list.',
+          strength,
+          samples: { a: usable.length, b: usable.length },
+          confidence: 'high',
+        });
+      }
+    }
+  }
+
   // Sort: strongest first.
   const order = { strong: 0, moderate: 1, weak: 2 };
   return candidates
     .sort((a, b) => order[a.strength] - order[b.strength])
-    .slice(0, 5);
+    .slice(0, 7);
 }

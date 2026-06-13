@@ -1,135 +1,406 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Minus, Sparkles } from 'lucide-react';
 
-interface Urge { created_at: string }
-interface PatternsData { riskFactors: string[]; timePatterns: string[]; copingStrategies: string[] }
-const BUCKETS = ['Morning', 'Afternoon', 'Evening', 'Night'] as const;
-
-function getHourBucket(ts: string): typeof BUCKETS[number] {
-  const h = new Date(ts).getHours();
-  if (h >= 5 && h < 12) return 'Morning';
-  if (h >= 12 && h < 17) return 'Afternoon';
-  if (h >= 17 && h < 21) return 'Evening';
-  return 'Night';
+interface HaltImpact { code: string; label: string; count: number; avg_intensity: number; delta_vs_overall: number }
+interface TriggerImpact { name: string; count: number; avg_intensity: number }
+interface HotTime { day: string; bucket: string; count: number }
+interface DailyPoint { date: string; count: number }
+interface Stats {
+  totals: { urges: number; surfs: number; urges_last30: number };
+  window: { last_count: number; prior_count: number; last_avg_intensity: number | null; prior_avg_intensity: number | null; last_surfs: number; prior_surfs: number };
+  overall_avg_intensity: number;
+  halt_impact: HaltImpact[];
+  triggers: TriggerImpact[];
+  hot_times: HotTime[];
+  surf: { total: number; completed: number; completion_rate: number | null };
+  daily_30d: DailyPoint[];
 }
 
+interface Observation { headline: string; detail: string; reference?: string }
+interface PlanSuggestion { field: 'triggers' | 'warning_signs' | 'replacement_behaviors'; text: string }
+interface Insights { observations: Observation[]; plan_suggestions: PlanSuggestion[] }
+interface AICacheResponse { insights: Insights | null; generated_at: string | null; cached_urge_count: number; current_urge_count: number; stale: boolean }
+
+function fmt(n: number | null, digits = 1): string {
+  return n === null || Number.isNaN(n) ? '—' : n.toFixed(digits);
+}
+
+function pctDelta(curr: number | null, prev: number | null): number | null {
+  if (curr === null || prev === null || prev === 0) return null;
+  return ((curr - prev) / prev) * 100;
+}
+
+const PLAN_FIELD_LABEL: Record<PlanSuggestion['field'], string> = {
+  triggers: 'Triggers',
+  warning_signs: 'Warning signs',
+  replacement_behaviors: 'Replacement behaviors',
+};
+
 export default function UrgePatterns({ refreshKey }: { refreshKey: number }) {
-  const [counts, setCounts] = useState<Record<string, number>>({ Morning: 0, Afternoon: 0, Evening: 0, Night: 0 });
-  const [dailyCounts, setDailyCounts] = useState<{ date: string; count: number }[]>([]);
-  const [patterns, setPatterns] = useState<PatternsData | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [insights, setInsights] = useState<Insights | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [aiRefreshing, setAiRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch('/api/recovery/urges').then(r => r.json()).then((urges: Urge[]) => {
-      const c = { Morning: 0, Afternoon: 0, Evening: 0, Night: 0 };
-      for (const u of urges) c[getHourBucket(u.created_at)]++;
-      setCounts(c);
+  // Append text to a section of the RP plan. Reuses the existing PUT shape;
+  // surfaces "Added" / "Already there" / "Failed" inline so the user has
+  // closure without leaving the patterns card.
+  const [appliedSuggestions, setAppliedSuggestions] = useState<Record<string, 'added' | 'duplicate' | 'failed'>>({});
 
-      const last30: { date: string; count: number }[] = [];
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0, 0, 0, 0);
-        const key = d.toISOString().split('T')[0];
-        last30.push({ date: key, count: urges.filter(u => u.created_at.startsWith(key)).length });
+  const loadStats = useCallback(async () => {
+    const res = await fetch('/api/recovery/patterns-stats');
+    if (!res.ok) return;
+    setStats(await res.json());
+  }, []);
+
+  // Single fetch that powers both the AI insights panel and the auto-regen
+  // logic: if the cache is stale (new urges since it was generated), kick
+  // off a background POST and swap in the fresh result when it lands.
+  const refreshing = useRef(false);
+  const loadAI = useCallback(async () => {
+    const res = await fetch('/api/ai/recovery-patterns');
+    if (!res.ok) return;
+    const data = (await res.json()) as AICacheResponse;
+    if (data.insights) setInsights(data.insights);
+    if (data.generated_at) setGeneratedAt(data.generated_at);
+    if (data.stale && !refreshing.current) {
+      refreshing.current = true;
+      setAiRefreshing(true);
+      try {
+        const regen = await fetch('/api/ai/recovery-patterns', { method: 'POST' });
+        if (regen.ok) {
+          const fresh = (await regen.json()) as Insights;
+          setInsights(fresh);
+          setGeneratedAt(new Date().toISOString());
+        } else {
+          const err = await regen.json().catch(() => ({}));
+          setError(err.error ?? 'AI refresh failed');
+        }
+      } finally {
+        setAiRefreshing(false);
+        refreshing.current = false;
       }
-      setDailyCounts(last30);
-    });
-  }, [refreshKey]);
+    }
+  }, []);
 
-  async function analysePatterns() {
-    setAiLoading(true);
-    const res = await fetch('/api/ai/recovery-patterns', { method: 'POST' });
-    const json = await res.json();
-    setPatterns(json);
-    setAiLoading(false);
+  useEffect(() => { loadStats(); loadAI(); }, [loadStats, loadAI, refreshKey]);
+
+  async function applyPlanSuggestion(idx: number, s: PlanSuggestion) {
+    setAppliedSuggestions(prev => ({ ...prev, [idx]: 'added' })); // optimistic
+    try {
+      const planRes = await fetch('/api/recovery/rp-plan');
+      const plan = await planRes.json() as Record<string, string>;
+      const current = plan[s.field] ?? '';
+      if (current.toLowerCase().includes(s.text.toLowerCase().slice(0, 40))) {
+        setAppliedSuggestions(prev => ({ ...prev, [idx]: 'duplicate' }));
+        return;
+      }
+      const next = current ? `${current.replace(/\s+$/, '')}\n${s.text}` : s.text;
+      const putRes = await fetch('/api/recovery/rp-plan', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [s.field]: next }),
+      });
+      if (!putRes.ok) setAppliedSuggestions(prev => ({ ...prev, [idx]: 'failed' }));
+    } catch {
+      setAppliedSuggestions(prev => ({ ...prev, [idx]: 'failed' }));
+    }
   }
 
-  const maxCount = Math.max(...Object.values(counts), 1);
-  const maxDaily = Math.max(...dailyCounts.map(d => d.count), 1);
-  const MAX_H = 60;
+  if (!stats) {
+    return <div className="card" style={{ marginBottom: 22, minHeight: 240 }} />;
+  }
+
+  const { totals, window: w, halt_impact, triggers, hot_times, surf, daily_30d, overall_avg_intensity } = stats;
+  const maxDaily = Math.max(...daily_30d.map(d => d.count), 1);
+  const maxHaltCount = Math.max(...halt_impact.map(h => h.count), 1);
+  const maxTrigCount = Math.max(...triggers.map(t => t.count), 1);
+
+  const countDelta = pctDelta(w.last_count, w.prior_count);
+  const intensityDelta = pctDelta(w.last_avg_intensity, w.prior_avg_intensity);
+  const surfDelta = pctDelta(w.last_surfs, w.prior_surfs);
 
   return (
     <div className="card" style={{ marginBottom: 22 }}>
+      <style>{`
+        .up-section { margin-top: 18px; }
+        .up-section:first-of-type { margin-top: 14px; }
+        .up-label {
+          font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+          letter-spacing: 0.14em; text-transform: uppercase;
+          color: var(--text-tertiary); margin-bottom: 10px;
+          display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        }
+
+        .up-shift-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .up-shift-cell {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 12px;
+          padding: 10px 12px;
+        }
+        .up-shift-name {
+          font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+          letter-spacing: 0.1em; text-transform: uppercase;
+          color: var(--text-tertiary); margin-bottom: 6px;
+        }
+        .up-shift-value { font-size: 20px; font-weight: 800; color: var(--text-primary); line-height: 1; }
+        .up-shift-prior { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); margin-top: 4px; }
+        .up-shift-delta {
+          font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+          display: inline-flex; align-items: center; gap: 2px; margin-top: 4px;
+        }
+        .up-shift-delta.up { color: var(--danger); }
+        .up-shift-delta.down { color: var(--success); }
+        .up-shift-delta.flat { color: var(--text-tertiary); }
+        .up-shift-delta.inv-up { color: var(--success); }
+        .up-shift-delta.inv-down { color: var(--danger); }
+
+        .up-bar-row {
+          display: flex; align-items: center; gap: 10px;
+          padding: 6px 0;
+        }
+        .up-bar-name { flex: 0 0 92px; font-size: 12px; color: var(--text-secondary); }
+        .up-bar-track {
+          flex: 1; height: 8px; background: rgba(255,255,255,0.04);
+          border-radius: 4px; overflow: hidden;
+        }
+        .up-bar-fill { height: 100%; background: rgba(242,192,99,0.55); border-radius: 4px; transition: width 320ms cubic-bezier(0.22,1,0.36,1); }
+        .up-bar-meta {
+          flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px;
+          color: var(--text-tertiary); min-width: 76px; text-align: right;
+        }
+        .up-bar-meta .hi { color: var(--warning); font-weight: 700; }
+
+        .up-hot-row { display: flex; gap: 6px; flex-wrap: wrap; }
+        .up-hot-pill {
+          font-size: 11px; padding: 5px 10px; border-radius: 14px;
+          background: rgba(242,192,99,0.1); border: 1px solid rgba(242,192,99,0.2);
+          color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: baseline;
+        }
+        .up-hot-pill .cnt {
+          font-family: var(--font-mono); font-size: 10px; color: #F2C063; font-weight: 700;
+        }
+
+        .up-trend-row { display: flex; gap: 2px; align-items: flex-end; height: 44px; }
+        .up-trend-bar { flex: 1; border-radius: 2px; align-self: flex-end; transition: height 320ms cubic-bezier(0.22,1,0.36,1); }
+        .up-trend-axis { display: flex; justify-content: space-between; margin-top: 4px; font-size: 9px; color: var(--text-tertiary); font-family: var(--font-mono); }
+
+        .up-ai-card {
+          margin-top: 18px; padding: 14px;
+          background: rgba(107,227,164,0.04);
+          border: 1px solid rgba(107,227,164,0.16);
+          border-radius: 12px;
+        }
+        .up-ai-head {
+          display: flex; align-items: center; gap: 6px;
+          font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+          letter-spacing: 0.14em; text-transform: uppercase;
+          color: var(--success); margin-bottom: 12px;
+        }
+        .up-ai-head .meta {
+          margin-left: auto; color: var(--text-tertiary);
+          font-size: 9px; letter-spacing: 0.08em; font-weight: 600;
+        }
+        .up-ai-pulse {
+          width: 6px; height: 6px; border-radius: 50%;
+          background: var(--warning); display: inline-block;
+          animation: up-pulse 1.2s ease-in-out infinite;
+        }
+        @keyframes up-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .up-obs { padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.04); }
+        .up-obs:first-of-type { border-top: none; padding-top: 0; }
+        .up-obs-head { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; line-height: 1.35; }
+        .up-obs-detail { font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
+        .up-obs-ref {
+          font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary);
+          margin-top: 4px; letter-spacing: 0.06em;
+        }
+
+        .up-suggest { margin-top: 10px; padding: 10px 12px;
+          background: rgba(255,255,255,0.025); border-radius: 10px;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+        .up-suggest-field {
+          font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+          letter-spacing: 0.12em; text-transform: uppercase;
+          color: var(--text-tertiary); margin-bottom: 4px;
+        }
+        .up-suggest-text { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+        .up-suggest-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        .up-suggest-btn {
+          padding: 5px 10px; border-radius: 8px; cursor: pointer;
+          background: rgba(107,227,164,0.12); border: 1px solid rgba(107,227,164,0.3);
+          color: var(--success); font-family: var(--font-mono); font-size: 10px;
+          font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .up-suggest-btn:hover { background: rgba(107,227,164,0.18); }
+        .up-suggest-status { font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.06em; color: var(--text-tertiary); }
+        .up-suggest-status.added { color: var(--success); }
+        .up-suggest-status.failed { color: var(--danger); }
+
+        .up-empty { font-size: 12px; color: var(--text-tertiary); padding: 8px 0; line-height: 1.5; }
+      `}</style>
+
       <div className="section-title">Urge Patterns</div>
 
-      {/* 30-day trend */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>30-Day Trend</div>
-        <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 52 }}>
-          {dailyCounts.map(d => (
-            <div key={d.date} title={`${d.date}: ${d.count}`} style={{
-              flex: 1, borderRadius: 2,
-              background: d.count > 0 ? 'rgba(242,192,99,0.5)' : 'rgba(255,255,255,0.04)',
-              height: d.count > 0 ? Math.max(3, Math.round((d.count / maxDaily) * 40)) : 3,
-              alignSelf: 'flex-end',
-            }} />
-          ))}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-          <span style={{ fontSize: 9, color: 'var(--text-tertiary)' }}>
-            {dailyCounts[0] ? new Date(dailyCounts[0].date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
-          </span>
-          <span style={{ fontSize: 9, color: 'var(--text-tertiary)' }}>Today</span>
+      {/* ── 7-day shift ────────────────────────────────────────────────── */}
+      <div className="up-section">
+        <div className="up-label">Last 7 days <span>vs prior 7</span></div>
+        <div className="up-shift-grid">
+          <div className="up-shift-cell">
+            <div className="up-shift-name">Urges</div>
+            <div className="up-shift-value">{w.last_count}</div>
+            <div className="up-shift-prior">prior {w.prior_count}</div>
+            <DeltaBadge value={countDelta} invertColor />
+          </div>
+          <div className="up-shift-cell">
+            <div className="up-shift-name">Avg intensity</div>
+            <div className="up-shift-value">{fmt(w.last_avg_intensity, 1)}</div>
+            <div className="up-shift-prior">prior {fmt(w.prior_avg_intensity, 1)}</div>
+            <DeltaBadge value={intensityDelta} invertColor />
+          </div>
+          <div className="up-shift-cell">
+            <div className="up-shift-name">Surfs</div>
+            <div className="up-shift-value">{w.last_surfs}</div>
+            <div className="up-shift-prior">prior {w.prior_surfs}</div>
+            <DeltaBadge value={surfDelta} />
+          </div>
         </div>
       </div>
 
-      {/* Time-of-day chart */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', height: 90 }}>
-        {BUCKETS.map(b => (
-          <div key={b} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{counts[b]}</div>
-            <div style={{ width: '100%', borderRadius: '4px 4px 0 0', background: 'rgba(242,192,99,0.45)', height: Math.max(4, Math.round((counts[b] / maxCount) * MAX_H)), transition: 'height 0.4s cubic-bezier(0.22,1,0.36,1)' }} />
-            <div style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{b}</div>
+      {/* ── HALT impact ───────────────────────────────────────────────── */}
+      <div className="up-section">
+        <div className="up-label">HALT impact <span>{halt_impact.length ? `avg ${overall_avg_intensity.toFixed(1)} overall` : ''}</span></div>
+        {halt_impact.length === 0 && (
+          <div className="up-empty">Tap a HALT toggle on at least 2 urges to see which states drive your worst urges.</div>
+        )}
+        {halt_impact.map(h => (
+          <div key={h.code} className="up-bar-row">
+            <div className="up-bar-name">{h.label}</div>
+            <div className="up-bar-track">
+              <div className="up-bar-fill" style={{ width: `${(h.count / maxHaltCount) * 100}%` }} />
+            </div>
+            <div className="up-bar-meta">
+              {h.count}× · <span className={h.delta_vs_overall >= 0.4 ? 'hi' : ''}>avg {h.avg_intensity.toFixed(1)}</span>
+            </div>
           </div>
         ))}
       </div>
 
-      <div style={{ marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: patterns ? 14 : 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>AI Pattern Analysis</div>
-          <button className="btn-secondary" style={{ padding: '6px 14px', fontSize: 12 }} onClick={analysePatterns} disabled={aiLoading}>
-            {aiLoading ? 'Analysing…' : patterns ? '↺ Re-analyse' : 'Analyse patterns'}
-          </button>
-        </div>
-
-        {patterns && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 4 }}>
-            {patterns.riskFactors.length > 0 && (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)', marginBottom: 8, letterSpacing: '0.06em' }}>Risk Factors</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {patterns.riskFactors.map((f, i) => (
-                    <span key={i} style={{ fontSize: 12, padding: '5px 10px', borderRadius: 20, background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.2)', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{f}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {patterns.timePatterns.length > 0 && (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#F2C063', marginBottom: 8, letterSpacing: '0.06em' }}>Time Patterns</div>
-                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  {patterns.timePatterns.map((p, i) => (
-                    <li key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, display: 'flex', gap: 8 }}>
-                      <span style={{ color: '#F2C063', flexShrink: 0 }}>–</span>{p}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {patterns.copingStrategies.length > 0 && (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--success)', marginBottom: 8, letterSpacing: '0.06em' }}>Coping Strategies</div>
-                <ol style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {patterns.copingStrategies.map((s, i) => (
-                    <li key={i} style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, display: 'flex', gap: 10 }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--success)', flexShrink: 0, marginTop: 1 }}>{i + 1}.</span>{s}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            )}
+      {/* ── Surf success ──────────────────────────────────────────────── */}
+      {surf.total > 0 && (
+        <div className="up-section">
+          <div className="up-label">Urge surf success</div>
+          <div className="up-bar-row">
+            <div className="up-bar-name">Completed</div>
+            <div className="up-bar-track">
+              <div className="up-bar-fill" style={{ width: `${(surf.completion_rate ?? 0) * 100}%`, background: 'rgba(107,227,164,0.6)' }} />
+            </div>
+            <div className="up-bar-meta">{surf.completed}/{surf.total} · {Math.round((surf.completion_rate ?? 0) * 100)}%</div>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* ── Triggers ──────────────────────────────────────────────────── */}
+      {triggers.length > 0 && (
+        <div className="up-section">
+          <div className="up-label">Triggers</div>
+          {triggers.map(t => (
+            <div key={t.name} className="up-bar-row">
+              <div className="up-bar-name">{t.name}</div>
+              <div className="up-bar-track">
+                <div className="up-bar-fill" style={{ width: `${(t.count / maxTrigCount) * 100}%` }} />
+              </div>
+              <div className="up-bar-meta">{t.count}× · avg {t.avg_intensity.toFixed(1)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Hot times ─────────────────────────────────────────────────── */}
+      {hot_times.length > 0 && (
+        <div className="up-section">
+          <div className="up-label">Hot windows</div>
+          <div className="up-hot-row">
+            {hot_times.map((h, i) => (
+              <span key={i} className="up-hot-pill">
+                {h.day} {h.bucket.toLowerCase()} <span className="cnt">×{h.count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── 30-day sparkline ──────────────────────────────────────────── */}
+      <div className="up-section">
+        <div className="up-label">30-day trend <span>{totals.urges_last30} urges</span></div>
+        <div className="up-trend-row">
+          {daily_30d.map(d => (
+            <div key={d.date} title={`${d.date}: ${d.count}`} className="up-trend-bar" style={{
+              background: d.count > 0 ? 'rgba(242,192,99,0.5)' : 'rgba(255,255,255,0.04)',
+              height: d.count > 0 ? Math.max(3, Math.round((d.count / maxDaily) * 40)) : 3,
+            }} />
+          ))}
+        </div>
+        <div className="up-trend-axis">
+          <span>{daily_30d[0] ? new Date(daily_30d[0].date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</span>
+          <span>Today</span>
+        </div>
+      </div>
+
+      {/* ── AI insights ───────────────────────────────────────────────── */}
+      <div className="up-ai-card">
+        <div className="up-ai-head">
+          <Sparkles size={11} strokeWidth={2} /> Insights
+          <span className="meta">
+            {aiRefreshing ? <><span className="up-ai-pulse" /> refreshing…</> : generatedAt ? `updated ${new Date(generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+          </span>
+        </div>
+        {error && <div className="up-empty" style={{ color: 'var(--danger)' }}>{error}</div>}
+        {!insights && !aiRefreshing && !error && <div className="up-empty">Generating your first analysis…</div>}
+        {insights?.observations?.map((o, i) => (
+          <div key={i} className="up-obs">
+            <div className="up-obs-head">{o.headline}</div>
+            <div className="up-obs-detail">{o.detail}</div>
+            {o.reference && <div className="up-obs-ref">{o.reference}</div>}
+          </div>
+        ))}
+        {insights?.plan_suggestions?.map((s, i) => {
+          const status = appliedSuggestions[i];
+          return (
+            <div key={`s-${i}`} className="up-suggest">
+              <div className="up-suggest-field">Add to · {PLAN_FIELD_LABEL[s.field]}</div>
+              <div className="up-suggest-text">{s.text}</div>
+              <div className="up-suggest-actions">
+                {!status && (
+                  <button className="up-suggest-btn" onClick={() => applyPlanSuggestion(i, s)}>+ Add</button>
+                )}
+                {status === 'added' && <span className="up-suggest-status added">added to plan</span>}
+                {status === 'duplicate' && <span className="up-suggest-status">already in plan</span>}
+                {status === 'failed' && <span className="up-suggest-status failed">failed — try again</span>}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function DeltaBadge({ value, invertColor = false }: { value: number | null; invertColor?: boolean }) {
+  if (value === null) return <div className="up-shift-delta flat">—</div>;
+  const rounded = Math.round(value);
+  if (Math.abs(rounded) < 1) {
+    return <div className="up-shift-delta flat"><Minus size={10} strokeWidth={2.5} /> flat</div>;
+  }
+  // invertColor=true means "higher is worse" (urge count, intensity) — up = red.
+  // invertColor=false means "higher is better" (surf count) — up = green.
+  const isUp = rounded > 0;
+  const cls = invertColor ? (isUp ? 'up' : 'down') : (isUp ? 'inv-up' : 'inv-down');
+  const Arrow = isUp ? ArrowUp : ArrowDown;
+  return <div className={`up-shift-delta ${cls}`}><Arrow size={10} strokeWidth={2.5} /> {Math.abs(rounded)}%</div>;
 }

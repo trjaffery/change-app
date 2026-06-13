@@ -1,75 +1,71 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { getActiveDateString } from '@/lib/dates';
-import Markdown from '@/components/coach/Markdown';
 
+interface BriefingPayload { line?: string; skip?: boolean; error?: string }
+
+/**
+ * One-line setup for today. Renders nothing when the server has no specific
+ * signal worth voicing — silence beats generic motivation.
+ */
 export default function DailyBriefing() {
-  const [briefing, setBriefing] = useState<string | null>(null);
+  const [line, setLine] = useState<string | null>(null);
+  const [skip, setSkip] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const today = getActiveDateString();
   const cacheKey = `briefing_${today}`;
 
-  async function generate() {
-    setLoading(true);
-    setErrorMsg(null);
+  useEffect(() => {
     const cached = localStorage.getItem(cacheKey);
-    if (cached) { setBriefing(cached); setLoading(false); return; }
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 25000);
-      const res = await fetch('/api/ai/briefing', { method: 'POST', signal: controller.signal });
-      clearTimeout(timeout);
-      const text = await res.text();
-      let data: Record<string, string> = {};
-      try { data = JSON.parse(text); } catch { setErrorMsg(`Bad response (${res.status}): ${text.slice(0, 120)}`); setLoading(false); return; }
-      if (data.briefing) {
-        localStorage.setItem(cacheKey, data.briefing);
-        setBriefing(data.briefing);
-      } else {
-        setErrorMsg(data.error ?? 'No briefing returned');
-      }
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : 'Network error');
-    }
-    setLoading(false);
-  }
+    if (cached === '__skip__') { setSkip(true); setLoading(false); return; }
+    if (cached) { setLine(cached); setLoading(false); return; }
 
-  useEffect(() => { generate(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000);
+        const res = await fetch('/api/ai/briefing', { method: 'POST', signal: controller.signal });
+        clearTimeout(timeout);
+        const data = await res.json() as BriefingPayload;
+        if (cancelled) return;
+        if (data.skip) {
+          localStorage.setItem(cacheKey, '__skip__');
+          setSkip(true);
+        } else if (data.line) {
+          localStorage.setItem(cacheKey, data.line);
+          setLine(data.line);
+        } else {
+          setSkip(true);
+        }
+      } catch {
+        if (!cancelled) setSkip(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [cacheKey]);
+
+  if (skip && !loading) return null;
 
   return (
     <>
       <style>{`
-        .briefing-card {
-          background: linear-gradient(135deg, rgba(107,227,164,0.06), rgba(255,255,255,0.03));
-          border: 1px solid rgba(107,227,164,0.15);
-          border-radius: 16px; padding: 18px 20px; margin-bottom: 20px;
+        .briefing-line {
+          padding: 12px 14px; margin-bottom: 20px;
+          border-radius: 12px;
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-left: 2px solid var(--success);
+          font-size: 14px; line-height: 1.5;
+          color: var(--text-secondary);
         }
-        .briefing-skeleton { height: 14px; border-radius: 6px; background: rgba(255,255,255,0.07); margin-bottom: 8px; animation: shimmer 1.4s ease-in-out infinite; }
-        @keyframes shimmer { 0%,100% { opacity: 0.5 } 50% { opacity: 1 } }
-        .briefing-retry { margin-top: 10px; background: none; border: 1px solid rgba(255,255,255,0.1); color: var(--text-tertiary); font-size: 11px; cursor: pointer; padding: 4px 10px; border-radius: 6px; transition: color 0.15s, background 0.15s; font-family: var(--font-mono); }
-        .briefing-retry:hover { color: var(--text-secondary); background: rgba(255,255,255,0.06); }
+        .briefing-skel { height: 14px; border-radius: 6px; background: rgba(255,255,255,0.07); animation: bf-pulse 1.4s ease-in-out infinite; }
+        @keyframes bf-pulse { 0%,100% { opacity: 0.45 } 50% { opacity: 0.85 } }
       `}</style>
-      <div className="briefing-card">
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--success)', marginBottom: 10, opacity: 0.8 }}>
-          Today&apos;s Briefing
-        </div>
-        {loading ? (
-          <>
-            <div className="briefing-skeleton" style={{ width: '95%' }} />
-            <div className="briefing-skeleton" style={{ width: '85%' }} />
-            <div className="briefing-skeleton" style={{ width: '70%' }} />
-          </>
-        ) : errorMsg ? (
-          <>
-            <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic', wordBreak: 'break-word' }}>Error: {errorMsg}</p>
-            <button className="briefing-retry" onClick={generate}>↺ Retry</button>
-          </>
-        ) : (
-          <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text-secondary)' }}>
-            <Markdown text={briefing ?? ''} />
-          </div>
-        )}
+      <div className="briefing-line">
+        {loading ? <div className="briefing-skel" style={{ width: '70%' }} /> : line}
       </div>
     </>
   );

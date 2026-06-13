@@ -31,6 +31,9 @@ export default function DiaryPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [reflection, setReflection] = useState<string | null>(null);
+  const [reflectLoading, setReflectLoading] = useState(false);
+  const wordCount = body.trim().split(/\s+/).filter(Boolean).length;
 
   // Load a single entry for the given date.
   const loadEntry = useCallback(async (date: string) => {
@@ -39,6 +42,7 @@ export default function DiaryPage() {
     setBody(data?.body ?? '');
     setMood(data?.mood ?? null);
     setSavedAt(data?.updated_at ?? null);
+    setReflection(null);
     // Autosize once after the new content lands. Done as a one-off here; the
     // typing path uses a grow-only debounced version below.
     requestAnimationFrame(() => {
@@ -129,6 +133,21 @@ export default function DiaryPage() {
   function onMoodChange(m: number | null) {
     setMood(m);
     scheduleSave(body, m);
+  }
+
+  async function getReflection() {
+    if (reflectLoading || wordCount < 40) return;
+    setReflectLoading(true);
+    setReflection(null);
+    try {
+      const res = await fetch('/api/ai/diary-reflect', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: activeDate, body, mood }),
+      });
+      const data = await res.json() as { question?: string | null };
+      if (data.question) setReflection(data.question);
+    } catch { /* silent */ }
+    finally { setReflectLoading(false); }
   }
 
   async function loadMorePast() {
@@ -297,7 +316,75 @@ export default function DiaryPage() {
         <div className="dr-status">
           <SavedLabel updatedAt={savedAt} saving={saving} />
           <span>{body.length} chars</span>
+          {isToday && wordCount >= 40 && (
+            <button
+              onClick={getReflection}
+              disabled={reflectLoading}
+              style={{
+                marginLeft: 'auto',
+                padding: '4px 10px',
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 8,
+                color: 'var(--text-tertiary)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                cursor: reflectLoading ? 'default' : 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              {reflectLoading ? 'thinking…' : reflection ? '↺ another' : 'ask a question'}
+            </button>
+          )}
         </div>
+        {reflection && (
+          <div style={{
+            marginTop: 12,
+            padding: '12px 14px',
+            background: 'rgba(120,180,255,0.04)',
+            borderLeft: '2px solid #78B4FF',
+            borderRadius: 10,
+            fontFamily: 'var(--font-serif)',
+            fontStyle: 'italic',
+            fontSize: 14,
+            lineHeight: 1.5,
+            color: 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+          }}>
+            <span style={{ flex: 1 }}>{reflection}</span>
+            <button
+              onClick={() => {
+                const sep = body.endsWith('\n') || body.length === 0 ? '' : '\n\n';
+                const next = body + sep + reflection + '\n';
+                setBody(next);
+                scheduleSave(next, mood);
+                setReflection(null);
+                requestAnimationFrame(() => textareaRef.current?.focus());
+              }}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(120,180,255,0.3)',
+                borderRadius: 8,
+                padding: '4px 10px',
+                color: '#78B4FF',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+                fontStyle: 'normal',
+                WebkitTapHighlightColor: 'transparent',
+                flexShrink: 0,
+              }}
+            >
+              + append
+            </button>
+          </div>
+        )}
       </div>
 
       <MoodChart entries={past} />

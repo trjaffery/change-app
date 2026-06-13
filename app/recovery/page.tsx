@@ -4,8 +4,7 @@ import { Waves, LifeBuoy } from 'lucide-react';
 import StreakCard from '@/components/recovery/StreakCard';
 import UrgeLog from '@/components/recovery/UrgeLog';
 import UrgePatterns from '@/components/recovery/UrgePatterns';
-import CheckIn from '@/components/recovery/CheckIn';
-import CopingStrategies from '@/components/recovery/CopingStrategies';
+import Momentum from '@/components/recovery/Momentum';
 import RelapseLog from '@/components/recovery/RelapseLog';
 import RelapsePreventionPlan from '@/components/recovery/RelapsePreventionPlan';
 import UrgeSurfingTimer from '@/components/recovery/UrgeSurfingTimer';
@@ -13,7 +12,6 @@ import PlayTheTape from '@/components/recovery/PlayTheTape';
 import CrisisMode from '@/components/recovery/CrisisMode';
 
 export default function RecoveryPage() {
-  const [days, setDays] = useState(0);
   const [urgeRefreshKey, setUrgeRefreshKey] = useState(0);
   const [crisisOpen, setCrisisOpen] = useState(false);
   const [surfOpen, setSurfOpen] = useState(false);
@@ -29,7 +27,7 @@ export default function RecoveryPage() {
     <>
       <h1 className="page-title">Recovery</h1>
 
-      <StreakCard onStreakChange={setDays} />
+      <StreakCard />
 
       <button
         onClick={() => setCrisisOpen(true)}
@@ -54,8 +52,6 @@ export default function RecoveryPage() {
         <LifeBuoy size={16} strokeWidth={1.75} />
         I need help right now
       </button>
-
-      <CheckIn days={days} />
 
       <UrgeLog onUrgeLogged={() => setUrgeRefreshKey(k => k + 1)} />
 
@@ -85,19 +81,19 @@ export default function RecoveryPage() {
 
       <PlayTheTape />
 
-      <CopingStrategies />
+      <Momentum refreshKey={urgeRefreshKey} />
 
       <RelapsePreventionPlan />
 
       <UrgePatterns refreshKey={urgeRefreshKey} />
 
-      <RelapseLog onRelapse={() => setDays(0)} />
+      <RelapseLog />
 
       <CrisisMode
         open={crisisOpen}
         onClose={() => setCrisisOpen(false)}
         onStartSurf={() => setSurfOpen(true)}
-        onOpenPlayTape={() => scrollTo('urge-log-card')}
+        onOpenPlayTape={() => scrollTo('play-the-tape-card')}
         onOpenLogUrge={() => scrollTo('urge-log-card')}
       />
 
