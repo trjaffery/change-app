@@ -20,10 +20,15 @@ export default function PlayTheTape() {
     setError(null);
     setResponse(null);
     try {
+      // Capture local time so the AI can name actual clock hours in the
+      // playback (the server may run in a different timezone, so we hand it
+      // a pre-formatted label plus the raw local hour).
+      const now = new Date();
+      const now_label = `${now.toLocaleDateString('en-US', { weekday: 'long' })}, ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
       const res = await fetch('/api/ai/play-the-tape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ situation }),
+        body: JSON.stringify({ situation, now_label, hour_now: now.getHours() }),
       });
       const data = await res.json() as { message?: string; error?: string };
       if (!res.ok || data.error) {

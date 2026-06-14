@@ -31,6 +31,7 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
   const [intensity, setIntensity] = useState(3);
   const [note, setNote] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [isCrisisDraft, setIsCrisisDraft] = useState(false);
   const [planTriggers, setPlanTriggers] = useState<string[]>([]);
   const [customInputOpen, setCustomInputOpen] = useState(false);
   const [customInput, setCustomInput] = useState('');
@@ -113,9 +114,9 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
   async function logUrge() {
     await fetch('/api/recovery/urges', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ intensity, note, tags: [...selected] }),
+      body: JSON.stringify({ intensity, note, tags: [...selected], is_crisis: isCrisisDraft }),
     });
-    setNote(''); setIntensity(3); setSelected(new Set()); setCustomInput(''); setCustomInputOpen(false);
+    setNote(''); setIntensity(3); setSelected(new Set()); setCustomInput(''); setCustomInputOpen(false); setIsCrisisDraft(false);
     fetchUrges(urges.length + 1); onUrgeLogged?.();
   }
 
@@ -260,7 +261,13 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
           </div>
 
           <input className="text-input" type="text" placeholder="Optional note…" style={{ width: '100%' }} value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => e.key === 'Enter' && logUrge()} />
-          <div><button className="btn-primary" style={{ padding: '10px 18px', fontSize: 13 }} onClick={logUrge}>Log Urge</button></div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <label className="urge-edit-crisis" style={{ cursor: 'pointer' }}>
+              <input type="checkbox" checked={isCrisisDraft} onChange={e => setIsCrisisDraft(e.target.checked)} />
+              Mark as crisis
+            </label>
+            <button className="btn-primary" style={{ padding: '10px 18px', fontSize: 13 }} onClick={logUrge}>Log Urge</button>
+          </div>
         </div>
 
         {urges.length > 0 && (
