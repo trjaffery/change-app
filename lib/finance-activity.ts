@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type ActivityAction = 'add' | 'edit' | 'delete';
-export type ActivityEntity = 'item' | 'subscription' | 'order' | 'wishlist';
+// 'order' and 'wishlist' still exist as historic entity_type values in old
+// finance_activity rows, but new writes can only be items or subscriptions.
+export type ActivityEntity = 'item' | 'subscription';
 
 /**
  * Append an entry to finance_activity. Fire-and-forget — never blocks the request

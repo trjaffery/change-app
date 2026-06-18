@@ -155,7 +155,12 @@ CREATE TABLE IF NOT EXISTS body_weight (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Finance activity log (audit trail for items / subscriptions / orders / wishlist)
+-- Finance activity log (audit trail for items / subscriptions).
+-- Historic rows with entity_type = 'order' or 'wishlist' may still exist and
+-- render fine in the UI; new writes are limited to items and subscriptions.
+-- The legacy finance_orders and finance_wishlist tables are no longer used:
+--   DROP TABLE IF EXISTS finance_orders;
+--   DROP TABLE IF EXISTS finance_wishlist;
 -- entity_id is text (not a FK) so deletes still log without orphaning.
 -- snapshot is whatever is needed to render the row (name, amount, category).
 CREATE TABLE IF NOT EXISTS finance_activity (

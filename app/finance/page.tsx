@@ -26,13 +26,11 @@ function cacheGet<T>(key: string): T | null {
   } catch { return null; }
 }
 
-type Tab = 'networth' | 'subscriptions' | 'orders' | 'wishlist' | 'transactions';
+type Tab = 'networth' | 'subscriptions' | 'transactions';
 type Category = 'bank' | 'stocks' | 'crypto' | 'other';
 
 interface FinanceItem { id: string; category: Category; name: string; value: number }
 interface Subscription { id: string; name: string; amount: number; billing_cycle: string; next_renewal: string | null }
-interface Order { id: string; name: string; amount: number; store: string | null; eta: string | null }
-interface WishlistItem { id: string; name: string; amount: number; url: string | null }
 interface PlaidAccount { account_id: string; name: string; official_name: string | null; mask: string | null; type: string; subtype: string; balances: { current: number | null; available: number | null } }
 interface PlaidConnection { institution_name: string | null; item_id: string; accounts: PlaidAccount[] }
 interface SubCandidate { name: string; amount: number; billing_cycle: string; next_renewal: string; occurrences: number }
@@ -452,18 +450,6 @@ export default function FinancePage() {
   const [candidates, setCandidates] = useState<SubCandidate[] | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
-  // Orders
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [addingOrder, setAddingOrder] = useState(false);
-  const [orderForm, setOrderForm] = useState({ name: '', amount: '', store: '', eta: '' });
-
-  // Wishlist
-  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
-  const [wishlistLoading, setWishlistLoading] = useState(true);
-  const [addingWish, setAddingWish] = useState(false);
-  const [wishForm, setWishForm] = useState({ name: '', amount: '', url: '' });
-
   // Plaid
   const [plaidConns, setPlaidConns] = useState<PlaidConnection[]>([]);
   const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
@@ -476,8 +462,6 @@ export default function FinancePage() {
   const [expandedTx, setExpandedTx] = useState<string | null>(null);
   const txFetched = useRef(false);
   const subsFetched = useRef(false);
-  const ordersFetched = useRef(false);
-  const wishlistFetched = useRef(false);
 
   // NW history
   const [nwHistory, setNwHistory] = useState<{ total: number; snapshot_date: string }[]>([]);
@@ -497,22 +481,6 @@ export default function FinancePage() {
     const d = await res.json() as Subscription[];
     setSubs(Array.isArray(d) ? d : []);
     setSubsLoading(false);
-  }, []);
-
-  const fetchOrders = useCallback(async () => {
-    setOrdersLoading(true);
-    const res = await fetch('/api/finance/orders');
-    const d = await res.json() as Order[];
-    setOrders(Array.isArray(d) ? d : []);
-    setOrdersLoading(false);
-  }, []);
-
-  const fetchWishlist = useCallback(async () => {
-    setWishlistLoading(true);
-    const res = await fetch('/api/finance/wishlist');
-    const d = await res.json() as WishlistItem[];
-    setWishlist(Array.isArray(d) ? d : []);
-    setWishlistLoading(false);
   }, []);
 
   const fetchPlaid = useCallback(async (): Promise<PlaidConnection[]> => {
@@ -636,9 +604,6 @@ export default function FinancePage() {
     if (!b.next_renewal) return -1;
     return new Date(a.next_renewal).getTime() - new Date(b.next_renewal).getTime();
   });
-  const totalOrders = orders.reduce((s, o) => s + o.amount, 0);
-  const totalWishlist = wishlist.reduce((s, w) => s + w.amount, 0);
-
   const donutData = ([
     { label: 'Bank', value: byCategory.bank + plaidBank, color: CATEGORY_META.bank.color },
     { label: 'Stocks', value: byCategory.stocks + plaidInvestments, color: CATEGORY_META.stocks.color },
@@ -724,50 +689,6 @@ export default function FinancePage() {
     setDismissed(prev => new Set(prev).add(name));
   }
 
-  // Order CRUD
-  async function addOrder() {
-    if (!orderForm.name || !orderForm.amount) return;
-    await fetch('/api/finance/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(orderForm),
-    });
-    setOrderForm({ name: '', amount: '', store: '', eta: '' });
-    setAddingOrder(false);
-    fetchOrders();
-  }
-
-  async function deleteOrder(id: string) {
-    await fetch('/api/finance/orders', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    fetchOrders();
-  }
-
-  // Wishlist CRUD
-  async function addWish() {
-    if (!wishForm.name || !wishForm.amount) return;
-    await fetch('/api/finance/wishlist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(wishForm),
-    });
-    setWishForm({ name: '', amount: '', url: '' });
-    setAddingWish(false);
-    fetchWishlist();
-  }
-
-  async function deleteWish(id: string) {
-    await fetch('/api/finance/wishlist', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    fetchWishlist();
-  }
-
   async function disconnectPlaid(item_id: string) {
     await fetch('/api/plaid/accounts', {
       method: 'DELETE',
@@ -784,8 +705,6 @@ export default function FinancePage() {
     { id: 'networth', label: 'Home' },
     { id: 'transactions', label: 'Spending' },
     { id: 'subscriptions', label: 'Subscriptions' },
-    { id: 'orders', label: 'Orders' },
-    { id: 'wishlist', label: 'Wishlist' },
   ];
 
   function handleTabChange(id: Tab) {
@@ -797,14 +716,6 @@ export default function FinancePage() {
     if (id === 'subscriptions' && !subsFetched.current) {
       subsFetched.current = true;
       fetchSubs();
-    }
-    if (id === 'orders' && !ordersFetched.current) {
-      ordersFetched.current = true;
-      fetchOrders();
-    }
-    if (id === 'wishlist' && !wishlistFetched.current) {
-      wishlistFetched.current = true;
-      fetchWishlist();
     }
   }
 
@@ -1154,7 +1065,7 @@ export default function FinancePage() {
               })}
 
               {/* Recent activity log — refreshes whenever any tracked entity count changes */}
-              <ActivityLog refreshKey={items.length + subs.length + orders.length + wishlist.length} />
+              <ActivityLog refreshKey={items.length + subs.length} />
 
               {/* Plaid connected accounts */}
               <div className="plaid-section">
@@ -1301,122 +1212,6 @@ export default function FinancePage() {
                     ));
                   })()}
                 </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── Orders Tab ── */}
-      {tab === 'orders' && (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 20 }}>
-            <div className="stat-pill">
-              <span className="stat-pill-num">{fmt(totalOrders)}</span>
-              <span className="stat-pill-label">incoming</span>
-            </div>
-            {totalNetWorth > 0 && totalOrders > 0 && (
-              <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                {(totalOrders / totalNetWorth * 100).toFixed(1)}% of net worth
-              </span>
-            )}
-          </div>
-
-          {ordersLoading ? (
-            <div className="empty-state">Loading…</div>
-          ) : (
-            <>
-              {orders.length === 0 && !addingOrder && (
-                <EmptyState
-                  glyph="◇"
-                  title="Nothing on the way"
-                  description="Add things you've ordered to see what's coming and how much of your net worth is mid-flight."
-                  action={{ label: '+ Add order', onClick: () => setAddingOrder(true) }}
-                />
-              )}
-              {orders.map(order => (
-                <div key={order.id} className="finance-row">
-                  <span className="finance-row-name">{order.name}</span>
-                  {order.store && <span className="finance-row-meta">from {order.store}</span>}
-                  {order.eta && <span className="finance-row-meta">ETA {fmtDate(order.eta)}</span>}
-                  {totalNetWorth > 0 && (
-                    <span className="pct-badge">{(order.amount / totalNetWorth * 100).toFixed(1)}%</span>
-                  )}
-                  <span className="finance-row-value">{fmt(order.amount)}</span>
-                  <button className="icon-btn danger" onClick={() => deleteOrder(order.id)} title="Delete">✕</button>
-                </div>
-              ))}
-              {addingOrder ? (
-                <div className="add-form" style={{ marginTop: 12 }}>
-                  <input className="text-input" placeholder="Item name" value={orderForm.name} onChange={e => setOrderForm(f => ({ ...f, name: e.target.value }))} autoFocus style={{ fontSize: 13, padding: '8px 12px' }} />
-                  <input className="text-input" type="number" placeholder="Amount ($)" value={orderForm.amount} onChange={e => setOrderForm(f => ({ ...f, amount: e.target.value }))} style={{ fontSize: 13, padding: '8px 12px', width: 120 }} />
-                  <input className="text-input" placeholder="Store (optional)" value={orderForm.store} onChange={e => setOrderForm(f => ({ ...f, store: e.target.value }))} style={{ fontSize: 13, padding: '8px 12px', width: 140 }} />
-                  <input className="text-input" type="date" placeholder="ETA" value={orderForm.eta} onChange={e => setOrderForm(f => ({ ...f, eta: e.target.value }))} style={{ fontSize: 13, padding: '8px 12px', colorScheme: 'dark' }} />
-                  <button className="btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={addOrder}>Add</button>
-                  <button className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => setAddingOrder(false)}>Cancel</button>
-                </div>
-              ) : (
-                <button className="btn-secondary" style={{ marginTop: 12, fontSize: 12, padding: '8px 14px' }} onClick={() => setAddingOrder(true)}>
-                  + Add Order
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── Wishlist Tab ── */}
-      {tab === 'wishlist' && (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 20 }}>
-            <div className="stat-pill">
-              <span className="stat-pill-num">{fmt(totalWishlist)}</span>
-              <span className="stat-pill-label">wanted</span>
-            </div>
-            {totalNetWorth > 0 && totalWishlist > 0 && (
-              <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                {(totalWishlist / totalNetWorth * 100).toFixed(1)}% of net worth
-              </span>
-            )}
-          </div>
-
-          {wishlistLoading ? (
-            <div className="empty-state">Loading…</div>
-          ) : (
-            <>
-              {wishlist.length === 0 && !addingWish && (
-                <EmptyState
-                  glyph="✦"
-                  title="No wishlist items"
-                  description="Drop things you want here. Seeing the % of net worth they'd cost is a good antidote to impulse."
-                  action={{ label: '+ Add to wishlist', onClick: () => setAddingWish(true) }}
-                />
-              )}
-              {wishlist.map(item => (
-                <div key={item.id} className="finance-row">
-                  <span className="finance-row-name">{item.name}</span>
-                  {item.url && (
-                    <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--text-tertiary)', textDecoration: 'none' }} title={item.url}>↗</a>
-                  )}
-                  {totalNetWorth > 0 && (
-                    <span className="pct-badge">{(item.amount / totalNetWorth * 100).toFixed(1)}%</span>
-                  )}
-                  <span className="finance-row-value">{fmt(item.amount)}</span>
-                  <button className="icon-btn danger" onClick={() => deleteWish(item.id)} title="Delete">✕</button>
-                </div>
-              ))}
-              {addingWish ? (
-                <div className="add-form" style={{ marginTop: 12 }}>
-                  <input className="text-input" placeholder="Item name" value={wishForm.name} onChange={e => setWishForm(f => ({ ...f, name: e.target.value }))} autoFocus style={{ fontSize: 13, padding: '8px 12px' }} />
-                  <input className="text-input" type="number" placeholder="Price ($)" value={wishForm.amount} onChange={e => setWishForm(f => ({ ...f, amount: e.target.value }))} style={{ fontSize: 13, padding: '8px 12px', width: 120 }} />
-                  <input className="text-input" placeholder="URL (optional)" value={wishForm.url} onChange={e => setWishForm(f => ({ ...f, url: e.target.value }))} style={{ fontSize: 13, padding: '8px 12px', flex: 2 }} />
-                  <button className="btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={addWish}>Add</button>
-                  <button className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => setAddingWish(false)}>Cancel</button>
-                </div>
-              ) : (
-                <button className="btn-secondary" style={{ marginTop: 12, fontSize: 12, padding: '8px 14px' }} onClick={() => setAddingWish(true)}>
-                  + Add to Wishlist
-                </button>
               )}
             </>
           )}

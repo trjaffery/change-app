@@ -36,7 +36,13 @@ function periodLabel(habit: Habit): string {
   return 'this month';
 }
 
-export default function HabitList({ onCompletionChange }: { onCompletionChange?: (done: number, total: number) => void }) {
+export default function HabitList({
+  onCompletionChange,
+  onCompletionPersisted,
+}: {
+  onCompletionChange?: (done: number, total: number) => void;
+  onCompletionPersisted?: () => void;
+}) {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [adding, setAdding] = useState(false);
   const [addStep, setAddStep] = useState(0); // 0 = name+color, 1 = schedule, 2 = goal
@@ -98,6 +104,8 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
 
   const onCompletionChangeRef = useRef(onCompletionChange);
   useEffect(() => { onCompletionChangeRef.current = onCompletionChange; }, [onCompletionChange]);
+  const onCompletionPersistedRef = useRef(onCompletionPersisted);
+  useEffect(() => { onCompletionPersistedRef.current = onCompletionPersisted; }, [onCompletionPersisted]);
 
   const fetchHabits = useCallback(async () => {
     try {
@@ -130,6 +138,10 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
       });
+      // Only signal dependent views (calendar) AFTER the write is durable —
+      // otherwise the calendar refetches mid-flight and misses the new
+      // completion (the "history doesn't show today" bug).
+      onCompletionPersistedRef.current?.();
     } catch { fetchHabits(); }
   }
 
@@ -142,6 +154,7 @@ export default function HabitList({ onCompletionChange }: { onCompletionChange?:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
       });
+      onCompletionPersistedRef.current?.();
     } catch { fetchHabits(); }
   }
 

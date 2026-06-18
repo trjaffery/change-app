@@ -92,6 +92,9 @@ export async function GET(req: NextRequest) {
   }
 
   const result = habits
+    // Don't surface a habit on dates before it was created — otherwise a habit
+    // you added today will look "missed" for every prior week it was scheduled.
+    .filter(h => ((h.created_at as string) ?? '').split('T')[0] <= date)
     .filter(h => isHabitDueToday(h, date))
     .map(h => {
       const periodStart = getPeriodStart(date, h.goal_period as string);
