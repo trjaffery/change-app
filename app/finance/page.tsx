@@ -554,7 +554,19 @@ export default function FinancePage() {
     fetchItems();
     fetchPlaid();
     fetchNWHistory();
-  }, [fetchItems, fetchPlaid, fetchNWHistory]);
+    // Subscriptions feed the Home tab's cashflow card too, not just the
+    // Subscriptions tab — fetch on mount so the burn number isn't $0.
+    fetchSubs(); subsFetched.current = true;
+  }, [fetchItems, fetchPlaid, fetchNWHistory, fetchSubs]);
+
+  // When a Plaid connection lands, fetch transactions for the cashflow card.
+  // The lazy on-tab fetch still kicks in if there's no connection at mount.
+  useEffect(() => {
+    if (plaidConns.length > 0 && !txFetched.current) {
+      txFetched.current = true;
+      fetchTransactions();
+    }
+  }, [plaidConns.length, fetchTransactions]);
 
   useEffect(() => {
     const stored = localStorage.getItem('finance_monthly_income');
@@ -597,7 +609,50 @@ export default function FinancePage() {
 
   const monthlyBurn = subs.reduce((s, sub) => s + toMonthly(sub.amount, sub.billing_cycle), 0);
   const yearlyBurn = subs.reduce((s, sub) => s + toYearly(sub.amount, sub.billing_cycle), 0);
-  const savingsRate = monthlyIncome > 0 ? Math.max(0, (monthlyIncome - monthlyBurn) / monthlyIncome * 100) : 0;
+
+  // ── Cashflow card data ────────────────────────────────────────────────
+  // Real spending from Plaid: positive-amount transactions, excluding the
+  // pseudo-flows (transfers, income, loan principal) that don't represent
+  // actual money leaving the wallet.
+  function isRealSpend(tx: PlaidTx): boolean {
+    if (tx.amount <= 0) return false;
+    const pfc = tx.personal_finance_category?.primary;
+    return pfc !== 'TRANSFER_IN' && pfc !== 'TRANSFER_OUT' && pfc !== 'INCOME' && pfc !== 'LOAN_PAYMENTS';
+  }
+  function isRealIncomeTx(tx: PlaidTx): boolean {
+    if (tx.amount >= 0) return false;
+    // Only count Plaid's INCOME category — TRANSFER_IN sweeps up Venmo, Zelle,
+    // and personal P2P which inflates the number and isn't actual paycheck income.
+    return tx.personal_finance_category?.primary === 'INCOME';
+  }
+
+  const _now = new Date();
+  const _monthStart = new Date(_now.getFullYear(), _now.getMonth(), 1).toISOString().split('T')[0];
+  const _30dCut = new Date(_now.getTime() - 30 * 86400000).toISOString().split('T')[0];
+  const _90dCut = new Date(_now.getTime() - 90 * 86400000).toISOString().split('T')[0];
+
+  const spendThisMonth = transactions.filter(t => t.date >= _monthStart && isRealSpend(t)).reduce((s, t) => s + t.amount, 0);
+  const spendLast90 = transactions.filter(t => t.date >= _90dCut && isRealSpend(t)).reduce((s, t) => s + t.amount, 0);
+  const avg3moSpend = spendLast90 / 3;
+  const plaidIncomeLast30 = transactions.filter(t => t.date >= _30dCut && isRealIncomeTx(t)).reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  const hasPlaidTx = plaidConns.length > 0 && transactions.length > 0;
+  const effectiveIncome = monthlyIncome > 0 ? monthlyIncome : plaidIncomeLast30;
+  const effectiveSpend = hasPlaidTx ? spendThisMonth : monthlyBurn;
+  const savingsRate = effectiveIncome > 0 ? Math.max(0, (effectiveIncome - effectiveSpend) / effectiveIncome * 100) : 0;
+
+  // NW delta over last 30 days. nwHistory is ascending by snapshot_date.
+  let nwDelta30: number | null = null;
+  let nwDelta30Pct: number | null = null;
+  if (nwHistory.length >= 2) {
+    const newest = nwHistory[nwHistory.length - 1];
+    // Find the snapshot closest to (but no later than) 30 days ago.
+    const target = nwHistory.filter(h => h.snapshot_date <= _30dCut).pop() ?? nwHistory[0];
+    if (target && newest && target.total !== 0) {
+      nwDelta30 = newest.total - target.total;
+      nwDelta30Pct = (nwDelta30 / target.total) * 100;
+    }
+  }
   const sortedSubs = [...subs].sort((a, b) => {
     if (!a.next_renewal && !b.next_renewal) return 0;
     if (!a.next_renewal) return 1;
@@ -832,14 +887,15 @@ export default function FinancePage() {
                 )}
               </div>
 
-              {/* Savings Rate */}
+              {/* Cashflow this month */}
               <div className="card" style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>Savings Rate</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>This month</div>
                   {!editingIncome && (
                     <button className="icon-btn" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center' }} onClick={() => { setEditingIncome(true); setIncomeInput(monthlyIncome > 0 ? String(monthlyIncome) : ''); }} aria-label="Edit income"><Pencil size={13} strokeWidth={1.75} /></button>
                   )}
                 </div>
+
                 {editingIncome ? (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <input
@@ -854,50 +910,91 @@ export default function FinancePage() {
                     />
                     <button className="btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={saveIncome}>Save</button>
                     <button className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => setEditingIncome(false)}>Cancel</button>
+                    {plaidIncomeLast30 > 0 && monthlyIncome === 0 && (
+                      <div style={{ width: '100%', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>
+                        Plaid detected ~{fmtDec(plaidIncomeLast30)} in deposits over the last 30 days — feel free to use that.
+                      </div>
+                    )}
                   </div>
-                ) : monthlyIncome > 0 ? (
-                  <div>
-                    <div style={{ display: 'flex', gap: 24, marginBottom: 12, flexWrap: 'wrap' }}>
-                      <div>
-                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Income</div>
-                        <div style={{ fontSize: 15, fontWeight: 700 }}>{fmtDec(monthlyIncome)}<span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 400 }}>/mo</span></div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Subscriptions</div>
-                        <div style={{ fontSize: 15, fontWeight: 700 }}>{fmtDec(monthlyBurn)}<span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 400 }}>/mo</span></div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3 }}>Savings rate</div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 10 ? '#F2C063' : 'var(--danger)' }}>
-                          {savingsRate.toFixed(1)}%
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.min(savingsRate, 100)}%`, height: '100%', background: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 10 ? '#F2C063' : 'var(--danger)', borderRadius: 4, transition: 'width 0.4s ease' }} />
-                    </div>
-                    {(() => {
-                      const monthlyNet = monthlyIncome - monthlyBurn;
-                      const yearProj = monthlyNet * 12;
-                      const tone = monthlyNet >= 0 ? 'var(--success)' : 'var(--danger)';
-                      return (
-                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-                          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>12-month projection</div>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700, color: tone, letterSpacing: '-0.01em' }}>
-                            {monthlyNet >= 0 ? '+' : '−'}{fmt(Math.abs(yearProj))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6 }}>Based on tracked subscriptions · savings from other spending not included</div>
-                  </div>
-                ) : (
+                ) : effectiveIncome === 0 && !hasPlaidTx ? (
                   <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-                    Set your monthly income to track your savings rate.{' '}
+                    Set your monthly income to see cashflow.{' '}
                     <button style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }} onClick={() => { setEditingIncome(true); setIncomeInput(''); }}>
                       Set income
                     </button>
                   </div>
+                ) : (
+                  <>
+                    {/* 3-stat row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>In</div>
+                        <div style={{ fontSize: 15, fontWeight: 700 }}>
+                          {effectiveIncome > 0 ? fmtDec(effectiveIncome) : '—'}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          {monthlyIncome > 0 ? 'manual' : effectiveIncome > 0 ? 'Plaid 30d' : 'not set'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Out</div>
+                        <div style={{ fontSize: 15, fontWeight: 700 }}>{fmtDec(effectiveSpend)}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          {hasPlaidTx ? 'real spend' : `subs only`}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>NW 30d</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: nwDelta30 === null ? 'var(--text-secondary)' : nwDelta30 >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {nwDelta30 === null ? '—' : `${nwDelta30 >= 0 ? '+' : '−'}${fmt(Math.abs(nwDelta30))}`}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          {nwDelta30Pct !== null ? `${nwDelta30Pct >= 0 ? '+' : ''}${nwDelta30Pct.toFixed(1)}%` : 'no history'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Savings rate */}
+                    {effectiveIncome > 0 && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <div style={{ fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Saving</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 10 ? '#F2C063' : 'var(--danger)' }}>
+                            {savingsRate.toFixed(1)}%
+                          </div>
+                        </div>
+                        <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(savingsRate, 100)}%`, height: '100%', background: savingsRate >= 20 ? 'var(--success)' : savingsRate >= 10 ? '#F2C063' : 'var(--danger)', borderRadius: 4, transition: 'width 0.4s ease' }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Comparison line: this month vs 3-mo avg */}
+                    {hasPlaidTx && avg3moSpend > 0 && (
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>vs 3-mo avg out</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-secondary)' }}>
+                          {fmtDec(avg3moSpend)}
+                          {(() => {
+                            const diff = effectiveSpend - avg3moSpend;
+                            const pct = avg3moSpend > 0 ? (diff / avg3moSpend) * 100 : 0;
+                            const tone = diff <= 0 ? 'var(--success)' : 'var(--danger)';
+                            return (
+                              <span style={{ color: tone, marginLeft: 8, fontWeight: 700 }}>
+                                {diff >= 0 ? '+' : '−'}{Math.abs(pct).toFixed(0)}%
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )}
+
+                    {!hasPlaidTx && (
+                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 10 }}>
+                        Connect a bank to count real spending — right now "Out" only reflects tracked subscriptions.
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
