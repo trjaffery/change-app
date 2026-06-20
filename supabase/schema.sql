@@ -270,3 +270,40 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   last_used_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS push_subscriptions_created_idx ON push_subscriptions(created_at DESC);
+
+-- Stage 2: per-habit reminder time (local time-of-day, no timezone — interpreted
+-- against notification_prefs.timezone at send time). NULL = no reminder.
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS reminder_time TIME;
+
+-- Stage 2: notification preferences. Singleton row (id=1). Quiet hours suppress
+-- everything except crisis-flagged pushes; digest/workout times use the configured
+-- timezone for clock matching.
+CREATE TABLE IF NOT EXISTS notification_prefs (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  timezone TEXT NOT NULL DEFAULT 'America/Chicago',
+  digest_enabled BOOLEAN NOT NULL DEFAULT true,
+  digest_time TIME NOT NULL DEFAULT '07:00',
+  habit_reminders_enabled BOOLEAN NOT NULL DEFAULT true,
+  workout_reminder_enabled BOOLEAN NOT NULL DEFAULT true,
+  workout_reminder_time TIME NOT NULL DEFAULT '17:00',
+  subscription_warnings_enabled BOOLEAN NOT NULL DEFAULT true,
+  streak_milestones_enabled BOOLEAN NOT NULL DEFAULT true,
+  urge_checkins_enabled BOOLEAN NOT NULL DEFAULT false,
+  urge_checkin_hours INTEGER[] NOT NULL DEFAULT ARRAY[22, 23],
+  quiet_hours_start TIME,    -- e.g. '23:00'
+  quiet_hours_end TIME,      -- e.g. '06:00'  (wraps midnight if start > end)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO notification_prefs(id) VALUES(1) ON CONFLICT DO NOTHING;
+
+-- Stage 2: dedup log so cron doesn't double-fire a digest or milestone in the
+-- same window. Keyed by (kind, key) — e.g. ('digest', '2026-06-21') or
+-- ('habit-reminder', '<habit_id>:2026-06-21') or ('milestone', '30:2026-06-21').
+CREATE TABLE IF NOT EXISTS notification_log (
+  id BIGSERIAL PRIMARY KEY,
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(kind, key)
+);
+CREATE INDEX IF NOT EXISTS notification_log_sent_idx ON notification_log(sent_at DESC);

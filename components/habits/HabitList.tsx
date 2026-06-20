@@ -17,6 +17,7 @@ interface Habit {
   schedule_type: string;
   schedule_days: number[] | null;
   schedule_count: number | null;
+  reminder_time: string | null;        // 'HH:MM:SS' or null
 }
 
 type ScheduleType = 'daily' | 'specific_days_week' | 'days_per_week' | 'specific_days_month' | 'days_per_month';
@@ -72,6 +73,8 @@ export default function HabitList({
   const [scheduleCount, setScheduleCount] = useState(3);
   const [goalPeriod, setGoalPeriod] = useState<'day' | 'week' | 'month'>('day');
   const [goalValue, setGoalValue] = useState(1);
+  // Empty string = no reminder. HTML <input type="time"> uses 'HH:MM'.
+  const [reminderTime, setReminderTime] = useState<string>('');
 
   // Edit state — single sheet, single-page form
   const [editId, setEditId] = useState<string | null>(null);
@@ -82,6 +85,7 @@ export default function HabitList({
   const [editScheduleCount, setEditScheduleCount] = useState(3);
   const [editGoalPeriod, setEditGoalPeriod] = useState<'day' | 'week' | 'month'>('day');
   const [editGoalValue, setEditGoalValue] = useState(1);
+  const [editReminderTime, setEditReminderTime] = useState<string>('');
   const [editSaving, setEditSaving] = useState(false);
 
   // Gesture: each row supports three pointer interactions, disambiguated by a
@@ -191,6 +195,7 @@ export default function HabitList({
       schedule_type: scheduleType,
       goal_period: goalPeriod,
       goal_value: goalValue,
+      reminder_time: reminderTime || null,
     };
     if (scheduleType === 'specific_days_week' || scheduleType === 'specific_days_month') {
       body.schedule_days = scheduleDays;
@@ -211,6 +216,7 @@ export default function HabitList({
       setScheduleCount(3);
       setGoalPeriod('day');
       setGoalValue(1);
+      setReminderTime('');
       setAddStep(0);
       setAdding(false);
       fetchHabits();
@@ -253,6 +259,8 @@ export default function HabitList({
     setEditScheduleCount(habit.schedule_count ?? 3);
     setEditGoalPeriod(habit.goal_period);
     setEditGoalValue(habit.goal_value);
+    // DB stores 'HH:MM:SS'; <input type="time"> wants 'HH:MM'.
+    setEditReminderTime(habit.reminder_time ? habit.reminder_time.slice(0, 5) : '');
     setRevealedId(null);
   }
   function cancelEdit() { setEditId(null); }
@@ -270,6 +278,7 @@ export default function HabitList({
         // linger as stale data and confuse the AI/stats next time we read them.
         schedule_days: (editScheduleType === 'specific_days_week' || editScheduleType === 'specific_days_month') ? editScheduleDays : null,
         schedule_count: (editScheduleType === 'days_per_week' || editScheduleType === 'days_per_month') ? editScheduleCount : null,
+        reminder_time: editReminderTime || null,
       };
       const res = await fetch(`/api/habits/${editId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -614,6 +623,26 @@ export default function HabitList({
                   </div>
                 </div>
               </div>
+              <div>
+                <div className="form-label" style={{ marginBottom: 8 }}>Reminder</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <input
+                    type="time"
+                    value={reminderTime}
+                    onChange={e => setReminderTime(e.target.value)}
+                    className="text-input"
+                    style={{ width: 120, fontSize: 14, padding: '12px' }}
+                  />
+                  {reminderTime && (
+                    <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => setReminderTime('')}>
+                      Clear
+                    </button>
+                  )}
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
+                    {reminderTime ? 'push when due' : 'optional'}
+                  </span>
+                </div>
+              </div>
               <div style={{ padding: '12px 14px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Summary</div>
                 <div style={{ fontSize: 14, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -757,6 +786,27 @@ export default function HabitList({
                     <button key={p} className={`seg-btn${editGoalPeriod === p ? ' active' : ''}`} onClick={() => setEditGoalPeriod(p)}>{p}</button>
                   ))}
                 </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="form-label" style={{ marginBottom: 8 }}>Reminder</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <input
+                  type="time"
+                  value={editReminderTime}
+                  onChange={e => setEditReminderTime(e.target.value)}
+                  className="text-input"
+                  style={{ width: 120, fontSize: 14, padding: '10px' }}
+                />
+                {editReminderTime && (
+                  <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => setEditReminderTime('')}>
+                    Clear
+                  </button>
+                )}
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
+                  {editReminderTime ? 'push when due' : 'no reminder'}
+                </span>
               </div>
             </div>
 

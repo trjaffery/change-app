@@ -9,7 +9,9 @@
     "lint": "eslint",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && wrangler dev",
-    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cron:deploy": "wrangler deploy --config cron-worker/wrangler.jsonc",
+    "cron:tail": "wrangler tail --config cron-worker/wrangler.jsonc"
   },
   "dependencies": {
     "@google/genai": "^2.3.0",

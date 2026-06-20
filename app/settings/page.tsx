@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Bell, BellOff, Check, Share, Plus, Smartphone } from 'lucide-react';
 import { useToast } from '@/components/layout/Toast';
+import NotificationPrefsCard from '@/components/settings/NotificationPrefsCard';
 
 type State = 'unsupported' | 'needs-install' | 'denied' | 'idle' | 'subscribed';
 
@@ -246,12 +247,11 @@ export default function SettingsPage() {
                 <BellOff size={12} strokeWidth={1.75} /> Turn off
               </button>
             </div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', marginTop: 4 }}>
-              Per-habit reminder times and the daily digest land in stage 2.
-            </div>
           </div>
         )}
       </div>
+
+      {state === 'subscribed' && <NotificationPrefsCard />}
     </>
   );
 }
