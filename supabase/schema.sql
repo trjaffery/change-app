@@ -255,3 +255,18 @@ CREATE TABLE IF NOT EXISTS coach_session_state (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 INSERT INTO coach_session_state(id) VALUES(1) ON CONFLICT DO NOTHING;
+
+-- Web Push subscriptions. One row per (device, browser) install of the PWA.
+-- The endpoint is the unique key — re-subscribing on the same device just
+-- upserts. p256dh + auth are the keys the browser hands us at subscribe time.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  label TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_created_idx ON push_subscriptions(created_at DESC);

@@ -4,6 +4,7 @@ import './globals.css';
 import Sidebar from '@/components/layout/Sidebar';
 import PageShell from '@/components/layout/PageShell';
 import { ToastProvider } from '@/components/layout/Toast';
+import ServiceWorkerRegister from '@/components/pwa/ServiceWorkerRegister';
 
 const hanken = Hanken_Grotesk({
   subsets: ['latin'],
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${hanken.variable} ${plex.variable} ${instrument.variable}`}>
       <body suppressHydrationWarning>
         <ToastProvider>
+          <ServiceWorkerRegister />
           <div className="grain" aria-hidden />
           <Sidebar />
           <main className="main-content">
