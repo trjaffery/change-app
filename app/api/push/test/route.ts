@@ -9,10 +9,12 @@ import { supabaseServer } from '@/lib/supabase';
  */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({})) as { endpoint?: string };
+  // Title intentionally != app name. iOS shows the app name automatically
+  // as a "from Change" subtitle below; a duplicate title looks redundant.
   const payload = {
-    title: 'Change',
-    body: 'Push notifications are working. 🎯',
-    url: '/',
+    title: 'Test push',
+    body: 'Notifications are wired up. You\'ll see real ones soon.',
+    url: '/settings',
     tag: 'test',
   };
 
