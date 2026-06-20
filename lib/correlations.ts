@@ -1,5 +1,17 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * Date conventions in this module:
+ *   • Day buckets (`utcDate`, day-of-week) are UTC. The server is single-
+ *     timezone so this keeps trailing-window aggregates stable; a non-UTC
+ *     user will see a midnight-UTC slide at the boundary but the trend is
+ *     the same.
+ *   • Time-of-day clustering (urges-by-time, hot windows) uses LOCAL hours
+ *     via `getHours()` so "evenings" reads as the user expects.
+ *   • Calendar "today" comes from `getActiveDateString()` (6 AM boundary) —
+ *     see lib/dates.ts. Don't hand-roll `new Date()` arithmetic when you
+ *     mean "today."
+ */
 export interface Correlation {
   id: string;
   finding: string;

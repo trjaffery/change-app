@@ -30,6 +30,45 @@ export default function ProgressGraph({ refreshKey }: { refreshKey: number }) {
       .finally(() => setLoading(false));
   }, [selected]);
 
+  // Phase 4 #15: detect a stalled exercise (same max weight for 3+ consecutive
+  // sessions) and auto-fetch the plateau tip without requiring a button tap.
+  // Cached in sessionStorage by (exercise|weight|count) so the call doesn't
+  // re-fire on every render while the user is browsing the page.
+  useEffect(() => {
+    if (!selected || history.length < 3 || plateauTip || plateauLoading) return;
+    const tail = history.slice(-3);
+    const weights = tail.map(s => s.maxWeight);
+    const stalled = weights.every(w => w === weights[0]);
+    if (!stalled) return;
+    const key = `plateau:${selected}:${weights[0]}:${tail.length}`;
+    if (typeof window !== 'undefined') {
+      const cached = window.sessionStorage.getItem(key);
+      if (cached) { setPlateauTip(cached); return; }
+    }
+    (async () => {
+      setPlateauLoading(true);
+      try {
+        const storedRest = typeof window !== 'undefined' ? localStorage.getItem('gymRestDuration') : null;
+        const restSeconds = storedRest ? Number(storedRest) : 90;
+        const res = await fetch('/api/ai/plateau', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            exercise: selected,
+            sessions: history.slice(-4).map(h => ({ date: h.date, maxWeight: h.maxWeight })),
+            restSeconds,
+          }),
+        });
+        const data = await res.json() as { suggestion?: string };
+        if (data.suggestion) {
+          setPlateauTip(data.suggestion);
+          if (typeof window !== 'undefined') window.sessionStorage.setItem(key, data.suggestion);
+        }
+      } catch { /* silent — the "Get tip" button is still available */ }
+      finally { setPlateauLoading(false); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, history]);
+
   async function getPlateauTip() {
     const storedRest = localStorage.getItem('gymRestDuration');
     const restSeconds = storedRest ? Number(storedRest) : 90;

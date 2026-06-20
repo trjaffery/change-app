@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
+import { useToast } from '@/components/layout/Toast';
 
 type HabitStatus = 'crushing' | 'on_track' | 'struggling' | 'new';
 
@@ -23,10 +24,10 @@ const STATUS_CONFIG: Record<HabitStatus, { label: string; color: string; bg: str
 };
 
 export default function HabitCoach() {
+  const toast = useToast();
   const [statuses, setStatuses] = useState<HabitStatusResult[] | null>(null);
   const [advice, setAdvice] = useState<CoachPostResponse | null>(null);
   const [adviceLoading, setAdviceLoading] = useState(false);
-  const [adviceError, setAdviceError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -41,7 +42,6 @@ export default function HabitCoach() {
   async function getAdvice() {
     if (!statuses) return;
     setAdviceLoading(true);
-    setAdviceError(null);
     try {
       const struggling = statuses.filter(s => s.status === 'struggling');
       const res = await fetch('/api/ai/habit-coach', {
@@ -49,10 +49,14 @@ export default function HabitCoach() {
         body: JSON.stringify({ struggling, total_habits: statuses.length }),
       });
       const data = await res.json() as CoachPostResponse & { error?: string };
-      if (data.error) setAdviceError(data.error);
-      else setAdvice(data);
+      if (!res.ok || data.error) {
+        toast({ kind: 'error', message: data.error ?? `Coach failed (${res.status})` });
+      } else {
+        setAdvice(data);
+      }
     } catch (e) {
-      setAdviceError(e instanceof Error ? e.message : 'Network error');
+      const msg = e instanceof Error ? e.message : 'Network error';
+      toast({ kind: 'error', message: `Coach failed: ${msg}` });
     } finally {
       setAdviceLoading(false);
     }
@@ -109,14 +113,26 @@ export default function HabitCoach() {
         })}
       </div>
 
-      {adviceError && (
-        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--danger)', fontStyle: 'italic' }}>{adviceError}</div>
-      )}
-
       {advice?.newHabitSuggestion && (
         <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px dashed rgba(255,255,255,0.12)' }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 6 }}>New habit idea</div>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.55 }}>{advice.newHabitSuggestion}</p>
+          <button
+            onClick={() => {
+              // HabitList listens for this and opens its add sheet pre-filled.
+              window.dispatchEvent(new CustomEvent('habit-prefill', { detail: { name: advice.newHabitSuggestion } }));
+            }}
+            style={{
+              marginTop: 8,
+              padding: '5px 10px', borderRadius: 8,
+              background: 'rgba(107,227,164,0.12)', border: '1px solid rgba(107,227,164,0.3)',
+              color: 'var(--success)', fontFamily: 'var(--font-mono)', fontSize: 10,
+              fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            + Try this
+          </button>
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { getActiveDateString, toDateString, formatDate } from '@/lib/dates';
 import BottomSheet from '@/components/layout/BottomSheet';
+import { useToast } from '@/components/layout/Toast';
 
 interface Habit {
   id: string;
@@ -43,6 +44,7 @@ export default function HabitList({
   onCompletionChange?: (done: number, total: number) => void;
   onCompletionPersisted?: () => void;
 }) {
+  const toast = useToast();
   const [habits, setHabits] = useState<Habit[]>([]);
   const [adding, setAdding] = useState(false);
   const [addStep, setAddStep] = useState(0); // 0 = name+color, 1 = schedule, 2 = goal
@@ -118,6 +120,21 @@ export default function HabitList({
 
   useEffect(() => { fetchHabits(); }, [fetchHabits]);
 
+  // Phase 2 #11: HabitCoach can dispatch a 'habit-prefill' event with a
+  // suggested name; we open the add sheet pre-filled at step 0.
+  useEffect(() => {
+    function onPrefill(e: Event) {
+      const detail = (e as CustomEvent<{ name?: string }>).detail;
+      if (detail?.name) {
+        setNewName(detail.name);
+        setAddStep(0);
+        setAdding(true);
+      }
+    }
+    window.addEventListener('habit-prefill', onPrefill);
+    return () => window.removeEventListener('habit-prefill', onPrefill);
+  }, []);
+
   function optimisticUpdate(habitId: string, delta: 1 | -1) {
     // Compute `next` outside the updater so we can also notify the parent without
     // running setState-from-render-of-another-component (React 19 flags that).
@@ -133,29 +150,37 @@ export default function HabitList({
   async function increment(habit: Habit) {
     optimisticUpdate(habit.id, 1);
     try {
-      await fetch('/api/habits/completions', {
+      const res = await fetch('/api/habits/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // Only signal dependent views (calendar) AFTER the write is durable —
       // otherwise the calendar refetches mid-flight and misses the new
       // completion (the "history doesn't show today" bug).
       onCompletionPersistedRef.current?.();
-    } catch { fetchHabits(); }
+    } catch {
+      toast({ kind: 'error', message: "Couldn't save — try again" });
+      fetchHabits();
+    }
   }
 
   async function decrement(habit: Habit) {
     if (habit.period_done === 0) return;
     optimisticUpdate(habit.id, -1);
     try {
-      await fetch('/api/habits/completions', {
+      const res = await fetch('/api/habits/completions', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ habit_id: habit.id, date: selectedDate }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       onCompletionPersistedRef.current?.();
-    } catch { fetchHabits(); }
+    } catch {
+      toast({ kind: 'error', message: "Couldn't save — try again" });
+      fetchHabits();
+    }
   }
 
   async function addHabit() {
@@ -173,20 +198,25 @@ export default function HabitList({
     if (scheduleType === 'days_per_week' || scheduleType === 'days_per_month') {
       body.schedule_count = scheduleCount;
     }
-    await fetch('/api/habits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    setNewName('');
-    setScheduleType('daily');
-    setScheduleDays([]);
-    setScheduleCount(3);
-    setGoalPeriod('day');
-    setGoalValue(1);
-    setAddStep(0);
-    setAdding(false);
-    fetchHabits();
+    try {
+      const res = await fetch('/api/habits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setNewName('');
+      setScheduleType('daily');
+      setScheduleDays([]);
+      setScheduleCount(3);
+      setGoalPeriod('day');
+      setGoalValue(1);
+      setAddStep(0);
+      setAdding(false);
+      fetchHabits();
+    } catch {
+      toast({ kind: 'error', message: "Couldn't add habit" });
+    }
   }
 
   function openAdd() {
@@ -204,9 +234,14 @@ export default function HabitList({
 
   async function deleteHabit(id: string) {
     if (!confirm('Delete this habit? All history will be lost.')) return;
-    await fetch(`/api/habits/${id}`, { method: 'DELETE' });
-    setRevealedId(null);
-    fetchHabits();
+    try {
+      const res = await fetch(`/api/habits/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRevealedId(null);
+      fetchHabits();
+    } catch {
+      toast({ kind: 'error', message: "Couldn't delete habit" });
+    }
   }
 
   function startEdit(habit: Habit) {
@@ -236,12 +271,15 @@ export default function HabitList({
         schedule_days: (editScheduleType === 'specific_days_week' || editScheduleType === 'specific_days_month') ? editScheduleDays : null,
         schedule_count: (editScheduleType === 'days_per_week' || editScheduleType === 'days_per_month') ? editScheduleCount : null,
       };
-      await fetch(`/api/habits/${editId}`, {
+      const res = await fetch(`/api/habits/${editId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       cancelEdit();
       fetchHabits();
+    } catch {
+      toast({ kind: 'error', message: "Couldn't save habit changes" });
     } finally { setEditSaving(false); }
   }
   function toggleEditScheduleDay(d: number) {

@@ -30,23 +30,42 @@ function roundJump(weight: number): number {
   return Math.round(weight / 5) * 5;
 }
 
+/**
+ * Suggest next session's targets.
+ *
+ * Phase 3 #16: RPE from the last session overrides the default jump:
+ *   • RPE ≥ 9 (very hard) → "repeat weight" even when target was hit,
+ *     to lock in form before progressing.
+ *   • RPE ≤ 4 (very easy) AND target was hit → bigger jump (+2× normal).
+ *   • Otherwise the original progressive-overload rule.
+ */
 export function suggestNext(
   exercise: string,
   history: HistorySession[],
   targetSets: number,
   targetRepsStr: string,
+  lastSessionRpe?: number | null,
 ): Suggestion | null {
   const targetLow = parseTargetReps(targetRepsStr);
-  const jump = SMALL_JUMP_RE.test(exercise) ? 2.5 : 5;
+  const baseJump = SMALL_JUMP_RE.test(exercise) ? 2.5 : 5;
 
   if (history.length === 0) {
     return null;
   }
 
   const last = sessionHitTarget(history[history.length - 1], targetLow);
+  const rpe = typeof lastSessionRpe === 'number' ? lastSessionRpe : null;
+  const isVeryHard = rpe !== null && rpe >= 9;
+  const isVeryEasy = rpe !== null && rpe <= 4;
+  const adjustedJump = isVeryEasy ? baseJump * 2 : baseJump;
+
   if (history.length === 1) {
     if (last.hit) {
-      return { sets: targetSets, reps: targetLow, weight: roundJump(last.topWeight + jump), notes: `Hit target last time — +${jump} lb` };
+      if (isVeryHard) {
+        return { sets: targetSets, reps: targetLow, weight: last.topWeight, notes: `RPE ${rpe} last time — repeat weight before progressing` };
+      }
+      const note = isVeryEasy ? `RPE ${rpe} — bigger jump: +${adjustedJump} lb` : `Hit target last time — +${adjustedJump} lb`;
+      return { sets: targetSets, reps: targetLow, weight: roundJump(last.topWeight + adjustedJump), notes: note };
     }
     return { sets: targetSets, reps: targetLow, weight: last.topWeight, notes: 'Repeat last weight until you hit target reps' };
   }
@@ -54,7 +73,11 @@ export function suggestNext(
   const prev = sessionHitTarget(history[history.length - 2], targetLow);
 
   if (last.hit) {
-    return { sets: targetSets, reps: targetLow, weight: roundJump(last.topWeight + jump), notes: `Hit target last time — +${jump} lb` };
+    if (isVeryHard) {
+      return { sets: targetSets, reps: targetLow, weight: last.topWeight, notes: `RPE ${rpe} last time — repeat weight before progressing` };
+    }
+    const note = isVeryEasy ? `RPE ${rpe} — bigger jump: +${adjustedJump} lb` : `Hit target last time — +${adjustedJump} lb`;
+    return { sets: targetSets, reps: targetLow, weight: roundJump(last.topWeight + adjustedJump), notes: note };
   }
 
   // Last failed. If the one before hit, repeat last weight.

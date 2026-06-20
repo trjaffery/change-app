@@ -124,10 +124,14 @@ CREATE TABLE IF NOT EXISTS split_exercises (
   target_sets INTEGER NOT NULL DEFAULT 3,
   target_reps TEXT NOT NULL DEFAULT '8',
   body_part TEXT,
+  -- Phase 4 #14: per-exercise rest override (seconds). Falls back to the
+  -- session-level restDuration when NULL.
+  default_rest_seconds INTEGER,
   position INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE split_exercises ADD COLUMN IF NOT EXISTS body_part TEXT;
+ALTER TABLE split_exercises ADD COLUMN IF NOT EXISTS default_rest_seconds INTEGER;
 
 -- Add split_day_id to gym_sets to link logged sets to templates
 -- ALTER TABLE gym_sets ADD COLUMN IF NOT EXISTS split_day_id UUID REFERENCES split_days(id);
@@ -242,3 +246,12 @@ CREATE TABLE IF NOT EXISTS weekly_review_cache (
   generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   review JSONB NOT NULL
 );
+
+-- Coach running summary. Single row; updated after each completed chat reply
+-- so the truncated 20-message context window still has a top-of-thread anchor.
+CREATE TABLE IF NOT EXISTS coach_session_state (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  summary TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO coach_session_state(id) VALUES(1) ON CONFLICT DO NOTHING;

@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { getActiveDateString } from '@/lib/dates';
 import { suggestNext } from '@/lib/gym-progression';
 import BottomSheet from '@/components/layout/BottomSheet';
+import { useToast } from '@/components/layout/Toast';
 
 interface WorkoutSummary {
   totals: { volume: number; sets: number; exercises: number; duration_minutes: number | null };
@@ -11,7 +12,7 @@ interface WorkoutSummary {
   prior_avg_volume: number | null;
   note: string | null;
 }
-interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string }
+interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string; default_rest_seconds?: number | null }
 interface GymSet { id: string; exercise: string; reps: number; weight: number }
 interface SetRow { reps: string; weight: string; loggedId: string | null }
 interface ExerciseBlock {
@@ -19,9 +20,18 @@ interface ExerciseBlock {
   splitExId: string | null;
   targetSets: number;
   targetReps: string;
+  // Phase 4 #14: per-exercise rest override. Null = use session-level restDuration.
+  restSeconds: number | null;
   rows: SetRow[];
   aiState: { label: string; response: string; loading: boolean } | null;
   lastSet: { weight: number; reps: number; daysAgo: number } | null;
+}
+
+// Heuristic for the default rest when neither the exercise template nor the
+// session-level value is set. Compounds need ~3 min; isolations ~75s.
+const COMPOUND_RE = /squat|deadlift|bench|row|press|dip|chin|pull-?up|hip thrust|clean|snatch|jerk|lunge/i;
+function inferRest(exercise: string): number {
+  return COMPOUND_RE.test(exercise) ? 180 : 75;
 }
 
 function daysBetween(isoDate: string): number {
@@ -50,6 +60,7 @@ export default function WorkoutSession({
   onFinish: () => void;
   restDuration?: number;
 }) {
+  const toast = useToast();
   const today = getActiveDateString();
   const [blocks, setBlocks] = useState<ExerciseBlock[]>([]);
   const [allExercises, setAllExercises] = useState<string[]>([]);
@@ -110,7 +121,7 @@ export default function WorkoutSession({
       const map: Record<string, GymSet[]> = {};
       for (const s of todaySets) { if (!map[s.exercise]) map[s.exercise] = []; map[s.exercise].push(s); }
       setBlocks(Object.entries(map).map(([exercise, sets]) => ({
-        exercise, splitExId: null, targetSets: sets.length, targetReps: '',
+        exercise, splitExId: null, targetSets: sets.length, targetReps: '', restSeconds: null,
         rows: sets.map(s => ({ reps: String(s.reps), weight: String(s.weight), loggedId: s.id })),
         aiState: null,
         lastSet: null,
@@ -154,7 +165,7 @@ export default function WorkoutSession({
       } else {
         rows = makeRows(ex.target_sets, lastWeight, ex.target_reps.split('-')[0]);
       }
-      return { exercise: ex.exercise, splitExId: ex.id, targetSets: ex.target_sets, targetReps: ex.target_reps, rows, aiState: null, lastSet };
+      return { exercise: ex.exercise, splitExId: ex.id, targetSets: ex.target_sets, targetReps: ex.target_reps, restSeconds: ex.default_rest_seconds ?? null, rows, aiState: null, lastSet };
     }));
     setLoading(false);
   }, [splitDayId, today]);
@@ -164,8 +175,12 @@ export default function WorkoutSession({
   function startRest(bi: number, ri: number) {
     if (restTimerRef.current) clearInterval(restTimerRef.current);
     setRestingAt({ bi, ri });
-    setRestRemaining(restDuration);
-    let remaining = restDuration;
+    // Phase 4 #14: per-exercise override wins; otherwise the compound/isolation
+    // heuristic; otherwise the session-level fallback.
+    const block = blocks[bi];
+    const effectiveRest = block.restSeconds ?? inferRest(block.exercise) ?? restDuration;
+    setRestRemaining(effectiveRest);
+    let remaining = effectiveRest;
     restTimerRef.current = setInterval(() => {
       remaining -= 1;
       if (remaining <= 0) {
@@ -229,21 +244,31 @@ export default function WorkoutSession({
     const block = blocks[bi];
     const row = block.rows[ri];
     if (!row.reps || !row.weight || row.loggedId) return;
-    const res = await fetch('/api/gym', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: today, exercise: block.exercise, reps: Number(row.reps), weight: Number(row.weight), split_day_id: splitDayId }),
-    });
-    const saved: GymSet = await res.json();
-    setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.map((r, j) => j !== ri ? r : { ...r, loggedId: saved.id }) }));
-    startRest(bi, ri);
+    try {
+      const res = await fetch('/api/gym', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: today, exercise: block.exercise, reps: Number(row.reps), weight: Number(row.weight), split_day_id: splitDayId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const saved: GymSet = await res.json();
+      setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.map((r, j) => j !== ri ? r : { ...r, loggedId: saved.id }) }));
+      startRest(bi, ri);
+    } catch {
+      toast({ kind: 'error', message: "Couldn't save set — try again" });
+    }
   }
 
   async function unlogSet(bi: number, ri: number) {
     const row = blocks[bi].rows[ri];
     if (!row.loggedId) return;
-    await fetch(`/api/gym/${row.loggedId}`, { method: 'DELETE' });
-    setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.map((r, j) => j !== ri ? r : { ...r, loggedId: null }) }));
+    try {
+      const res = await fetch(`/api/gym/${row.loggedId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.map((r, j) => j !== ri ? r : { ...r, loggedId: null }) }));
+    } catch {
+      toast({ kind: 'error', message: "Couldn't remove set" });
+    }
   }
 
   function addSetRow(bi: number) {
@@ -254,20 +279,50 @@ export default function WorkoutSession({
 
   async function addFreeExercise() {
     if (!freeEx.trim()) return;
-    setBlocks(prev => [...prev, { exercise: freeEx.trim(), splitExId: null, targetSets: 3, targetReps: '', rows: makeRows(3, '', ''), aiState: null, lastSet: null }]);
+    setBlocks(prev => [...prev, { exercise: freeEx.trim(), splitExId: null, targetSets: 3, targetReps: '', restSeconds: null, rows: makeRows(3, '', ''), aiState: null, lastSet: null }]);
     setFreeEx('');
+  }
+
+  // Phase 4 #14: cycle the per-exercise rest override through a small preset
+  // ladder. Tapping at the heuristic default starts at 60s; tapping past 240s
+  // clears the override back to "use heuristic."
+  const REST_PRESETS = [60, 90, 120, 180, 240];
+  async function cycleRest(bi: number) {
+    const block = blocks[bi];
+    let next: number | null;
+    if (block.restSeconds === null) next = REST_PRESETS[0];
+    else {
+      const idx = REST_PRESETS.indexOf(block.restSeconds);
+      if (idx === -1) next = REST_PRESETS[0];
+      else if (idx === REST_PRESETS.length - 1) next = null;
+      else next = REST_PRESETS[idx + 1];
+    }
+    setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, restSeconds: next }));
+    // Persist on the template if this block came from one. Free exercises live
+    // only in this session — no row to persist to.
+    if (block.splitExId) {
+      try {
+        await fetch(`/api/gym/split-exercises/${block.splitExId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ default_rest_seconds: next }),
+        });
+      } catch {
+        toast({ kind: 'error', message: "Couldn't save rest preference" });
+      }
+    }
   }
 
   async function suggestAI(bi: number) {
     const block = blocks[bi];
     setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, aiState: { label: '', response: '', loading: true } }));
-    const hist: { date: string; sets: { reps: number; weight: number }[] }[] = await fetch(`/api/gym/history?exercise=${encodeURIComponent(block.exercise)}`).then(r => r.json());
+    const hist: { date: string; sets: { reps: number; weight: number }[]; rpe?: number | null }[] = await fetch(`/api/gym/history?exercise=${encodeURIComponent(block.exercise)}`).then(r => r.json());
     const sessions = hist.slice(-3);
     if (!sessions.length) {
       setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, aiState: { label: '', response: 'No history yet.', loading: false } }));
       return;
     }
-    const data = suggestNext(block.exercise, sessions, block.targetSets, block.targetReps);
+    const lastRpe = sessions[sessions.length - 1]?.rpe ?? null;
+    const data = suggestNext(block.exercise, sessions, block.targetSets, block.targetReps, lastRpe);
     setBlocks(prev => prev.map((b, i) => i !== bi ? b : {
       ...b,
       aiState: data
@@ -753,6 +808,20 @@ export default function WorkoutSession({
                   ↘ {block.lastSet.weight}×{block.lastSet.reps} · {lastTone}
                 </span>
               )}
+              <button
+                onClick={() => cycleRest(bi)}
+                title="Tap to change rest"
+                style={{
+                  marginLeft: 4, padding: '2px 8px', borderRadius: 999,
+                  background: 'transparent',
+                  border: `1px solid ${block.restSeconds !== null ? 'rgba(120,180,255,0.32)' : 'rgba(255,255,255,0.10)'}`,
+                  color: block.restSeconds !== null ? '#78B4FF' : 'var(--text-tertiary)',
+                  fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.06em',
+                  cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                rest {(block.restSeconds ?? inferRest(block.exercise))}s
+              </button>
               <button
                 className="ws-section-ai"
                 disabled={block.aiState?.loading}

@@ -148,7 +148,8 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
                 })}
               </div>
 
-              {/* Habit cell rows */}
+              {/* Habit cell rows. Each cell's opacity scales from 0 (no count)
+                  to 1 (count >= goal). See legend below the grid. */}
               {data.habits.map(habit => {
                 const habitCompletions = data.completions[habit.id] ?? {};
                 return (
@@ -181,13 +182,16 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
           </div>
         </div>
 
-        {/* Legend */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>Less</span>
-          {[0.15, 0.35, 0.6, 0.8, 1].map(o => (
-            <div key={o} style={{ width: 12, height: 12, borderRadius: 3, background: `rgba(255,255,255,${o * 0.6 + 0.08})` }} />
-          ))}
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>More</span>
+        {/* Legend: opacity steps with a hint at what each step represents. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>
+          <span>0</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            {[0, 0.5, 1].map(o => (
+              <div key={o} style={{ width: 12, height: 12, borderRadius: 3, background: `rgba(107,227,164,${0.18 + o * 0.7})`, border: o === 0 ? '1px solid rgba(255,255,255,0.08)' : 'none' }} />
+            ))}
+          </div>
+          <span>goal</span>
+          <span style={{ marginLeft: 12 }}>opacity = count ÷ goal · over-goal still caps at solid</span>
         </div>
       </div>
     </>

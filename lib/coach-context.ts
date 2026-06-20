@@ -32,7 +32,7 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     sb.from('recovery_urges').select('intensity, note, created_at').order('created_at', { ascending: false }).limit(5),
     sb.from('goals').select('text, done').eq('date', todayStr),
     sb.from('goals').select('date, text, done').gte('date', sevenAgo).lte('date', todayStr),
-    sb.from('gym_sessions').select('date, duration_seconds, split_days(name)').gte('date', sevenAgo).lte('date', todayStr),
+    sb.from('gym_sessions').select('date, duration_seconds, rpe, split_days(name)').gte('date', sevenAgo).lte('date', todayStr),
     sb.from('recovery_relapses').select('created_at, note').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
     sb.from('finance_nw_history').select('total, snapshot_date').gte('snapshot_date', sevenAgo).lte('snapshot_date', todayStr).order('snapshot_date'),
     sb.from('diary_entries').select('date, body, mood').gte('date', sevenAgo).lte('date', todayStr).order('date', { ascending: false }),
@@ -145,9 +145,13 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
   const sessions = sessionsRes.data ?? [];
   const workoutCount = sessions.length;
   const totalMin = Math.round(sessions.reduce((s, sess) => s + ((sess.duration_seconds ?? 0) as number), 0) / 60);
+  // RPE rollup so the coach can reference how hard recent sessions felt.
+  const rpes = sessions.map(s => (s.rpe as number | null)).filter((r): r is number => typeof r === 'number');
+  const avgRpe = rpes.length ? rpes.reduce((s, r) => s + r, 0) / rpes.length : null;
+  const rpeLine = avgRpe !== null ? ` Avg RPE this week ${avgRpe.toFixed(1)}/10.` : '';
   const gymWeekLine = workoutCount === 0
     ? 'No workouts logged in the last 7 days.'
-    : `${workoutCount} workouts, ${totalMin} minutes total in the last 7 days.`;
+    : `${workoutCount} workouts, ${totalMin} minutes total in the last 7 days.${rpeLine}`;
 
   // Net worth change.
   const nw = nwHistoryRes.data ?? [];

@@ -1,4 +1,23 @@
-// Date helpers — same logic as the original index.html (6 AM day boundary).
+// Date helpers — canonical "today" with a 6 AM day boundary (matches the
+// original index.html). Convention used across the app:
+//
+//   • Anywhere a *calendar day* matters (today's habits, today's goals,
+//     today's diary, the active workout date) use `getActiveDateString()`.
+//     Before 6 AM local time it returns yesterday's calendar date so a
+//     late-night log still counts as the prior day.
+//
+//   • Anywhere a *clock hour* matters (time-of-day urge clustering, the
+//     play-the-tape prompt's current-hour anchor) use local `getHours()` so
+//     "evening" means what the user thinks.
+//
+//   • Anywhere a *day-of-week* matters server-side (correlations, momentum
+//     windows) use UTC day boundaries. This keeps the server's bucket
+//     assignments stable across timezones; users in non-UTC zones see a
+//     slight shift at midnight UTC, which is acceptable for the trailing-
+//     window aggregates we compute.
+//
+// When in doubt, prefer `getActiveDateString()` + this module — don't
+// hand-roll `new Date()` arithmetic in components.
 
 function padZ(n: number) {
   return String(n).padStart(2, '0');

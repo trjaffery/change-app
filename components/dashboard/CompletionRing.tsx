@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { getActiveDateString } from '@/lib/dates';
 
 const CIRC = 2 * Math.PI * 52;
 
@@ -40,6 +41,23 @@ export default function CompletionRing({ done, total }: Props) {
   const allDone = total > 0 && done === total;
   const stroke = allDone ? '#6BE3A4' : pct > 0 ? '#F2C063' : 'rgba(255,255,255,0.08)';
 
+  // Phase 2 #6: celebration moment when the user crosses 100% for the first time
+  // today. Once per active day (6 AM boundary), keyed in localStorage.
+  const [celebrating, setCelebrating] = useState(false);
+  const prevAllDone = useRef(false);
+  useEffect(() => {
+    if (allDone && !prevAllDone.current) {
+      const key = `habits_celebrated_${getActiveDateString()}`;
+      if (typeof window !== 'undefined' && !localStorage.getItem(key)) {
+        localStorage.setItem(key, '1');
+        setCelebrating(true);
+        const t = setTimeout(() => setCelebrating(false), 4200);
+        return () => clearTimeout(t);
+      }
+    }
+    prevAllDone.current = allDone;
+  }, [allDone]);
+
   // Live clock — tick every 30s. No need to be more precise than that for a phase chip.
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
@@ -72,8 +90,22 @@ export default function CompletionRing({ done, total }: Props) {
 
   return (
     <div className="card" style={{ marginBottom: 22 }}>
+      <style>{`
+        @keyframes ring-pulse {
+          0%, 100% { transform: scale(1); }
+          22%      { transform: scale(1.06); }
+          55%      { transform: scale(0.98); }
+        }
+        @keyframes ring-glow {
+          0%, 100% { filter: drop-shadow(0 0 0 rgba(107,227,164,0)); }
+          50%      { filter: drop-shadow(0 0 24px rgba(107,227,164,0.55)); }
+        }
+        .ring-celebrate { animation: ring-pulse 1.6s ease-in-out 2, ring-glow 1.6s ease-in-out 2; }
+        @keyframes cel-fade { 0% { opacity: 0; transform: translateY(4px); } 18% { opacity: 1; transform: translateY(0); } 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-2px); } }
+        .ring-cel-line { animation: cel-fade 4s ease-in-out forwards; color: var(--success); font-family: var(--font-serif); font-style: italic; font-size: 13px; }
+      `}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, flexWrap: 'wrap' }}>
-        <div style={{ width: 160, height: 160, position: 'relative', flexShrink: 0 }}>
+        <div className={celebrating ? 'ring-celebrate' : ''} style={{ width: 160, height: 160, position: 'relative', flexShrink: 0 }}>
           <svg viewBox="0 0 120 120" fill="none" style={{ width: '100%', height: '100%' }}>
             <defs>
               <filter id="ring-glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -113,6 +145,9 @@ export default function CompletionRing({ done, total }: Props) {
               ? 'Nothing done yet.'
               : `${total - done} left today`}
           </div>
+          {celebrating && (
+            <div className="ring-cel-line">Alhamdulillah — every one of them, today.</div>
+          )}
           {total > 0 && (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>
               {Math.round(pct * 100)}% complete

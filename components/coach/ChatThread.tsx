@@ -6,11 +6,10 @@ import { useToast } from '@/components/layout/Toast';
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
 const STORAGE_KEY = 'coach_messages';
-const EXAMPLE_PROMPTS = [
+const FALLBACK_PROMPTS = [
   'Why was last week hard?',
   'What should I focus on this Saturday?',
   'Plan me a deload week given my recent lifts.',
-  "I'm tempted right now — what should I do?",
   'How does my net worth tie to my habits?',
 ];
 
@@ -22,6 +21,8 @@ export default function ChatThread() {
   const [streamingReply, setStreamingReply] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  // Phase 3 #17: dynamic example prompts derived from current state.
+  const [examplePrompts, setExamplePrompts] = useState<string[]>(FALLBACK_PROMPTS);
   const listRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -50,6 +51,14 @@ export default function ChatThread() {
 
   // If the user navigates away mid-stream, cancel the in-flight request.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Pull contextual example prompts on mount. Falls back to defaults silently.
+  useEffect(() => {
+    fetch('/api/ai/chat/prompts')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.prompts?.length) setExamplePrompts(d.prompts); })
+      .catch(() => { /* keep fallback */ });
+  }, []);
 
   async function send(text: string) {
     const trimmed = text.trim();
@@ -87,6 +96,13 @@ export default function ChatThread() {
       }
       if (acc) {
         setMessages(prev => [...prev, { role: 'assistant', content: acc }]);
+        // Phase 3 #18: kick off a fire-and-forget summary update so the next
+        // turn's truncated context window can read it back. Doesn't block UI.
+        fetch('/api/ai/chat/summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: text, assistant: acc }),
+        }).catch(() => { /* non-blocking */ });
       }
       setStreamingReply('');
     } catch (e) {
@@ -228,7 +244,7 @@ export default function ChatThread() {
                 Ask anything — I see your habits, recovery, gym, finance, and the patterns across them. The more specific you are, the more useful I can be.
               </div>
               <div className="chat-examples">
-                {EXAMPLE_PROMPTS.map(p => (
+                {examplePrompts.map(p => (
                   <button key={p} className="chat-example" onClick={() => { setDraft(p); taRef.current?.focus(); }}>
                     {p}
                   </button>

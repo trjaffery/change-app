@@ -11,6 +11,10 @@ interface Entry { date: string; body: string; mood: number | null; updated_at: s
 const INITIAL_PAST = 30; // pull enough at first to power the 30-day mood chart + 60-day heatmap
 const NEXT_PAGE = 20;
 const MOOD_TONES = ['#FF6B6B', '#E07658', '#F2C063', '#9BD56F', '#6BE3A4'];
+// Phase 2 #10: small intuition cue alongside the color tone. The app generally
+// avoids emoji, but at the extremes (1/5 = rough day, 5/5 = great day) a tiny
+// face beats a color you might not register at a glance.
+const MOOD_LABELS = ['rough', 'low', 'okay', 'good', 'great'] as const;
 
 function shiftDate(dateStr: string, deltaDays: number): string {
   const d = new Date(dateStr + 'T12:00:00');
@@ -283,6 +287,7 @@ export default function DiaryPage() {
           {[1, 2, 3, 4, 5].map(n => {
             const isSel = mood === n;
             const tone = MOOD_TONES[n - 1];
+            const label = MOOD_LABELS[n - 1];
             return (
               <button
                 key={n}
@@ -293,7 +298,8 @@ export default function DiaryPage() {
                   borderColor: isSel ? `${tone}88` : 'rgba(255,255,255,0.08)',
                   color: isSel ? tone : 'var(--text-tertiary)',
                 }}
-                aria-label={`Mood ${n}`}
+                aria-label={`Mood ${n} — ${label}`}
+                title={label}
               >
                 {n}
               </button>

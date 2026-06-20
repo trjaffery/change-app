@@ -8,36 +8,69 @@ const MILESTONES = [
   { days: 90, label: '90 Days' }, { days: 180, label: '6 Months' }, { days: 365, label: '1 Year' },
 ];
 
-function computeDays(start: string): number {
-  const startDate = new Date(start + 'T00:00:00');
+function computeDaysFromIso(iso: string): number {
+  const startDate = new Date(iso);
+  startDate.setHours(0, 0, 0, 0);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   return Math.max(0, Math.floor((today.getTime() - startDate.getTime()) / 86400000));
 }
 
-export default function StreakCard({ onStreakChange }: { onStreakChange?: (days: number) => void }) {
-  const [start, setStart] = useState('');
+interface Relapse { id: string; created_at: string }
+
+/**
+ * Streak anchors to whichever is more recent: the user's `sobriety_start`
+ * setting OR the most recent relapse. Previously this only read the setting,
+ * so logging a relapse never reset the displayed streak (a real bug).
+ *
+ * The parent passes `refreshKey` so RelapseLog can bump it after logging and
+ * the streak re-anchors immediately without a page reload.
+ */
+export default function StreakCard({
+  onStreakChange,
+  refreshKey = 0,
+}: {
+  onStreakChange?: (days: number) => void;
+  refreshKey?: number;
+}) {
+  const [anchorIso, setAnchorIso] = useState<string>('');
   const [days, setDays] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  async function fetchStart() {
-    const res = await fetch('/api/recovery/settings?key=sobriety_start');
-    const data = await res.json();
-    const s = data.sobriety_start ?? toDateString(new Date());
-    if (!data.sobriety_start) {
+  async function loadStreak() {
+    // Pull sobriety_start + latest relapse in parallel; pick max.
+    const [settingsRes, relapsesRes] = await Promise.all([
+      fetch('/api/recovery/settings?key=sobriety_start').then(r => r.json()).catch(() => ({})),
+      fetch('/api/recovery/relapses').then(r => r.json()).catch(() => []),
+    ]);
+
+    let sobrietyIso: string = settingsRes.sobriety_start ?? '';
+    // Seed the setting on first use so the streak has a stable origin date.
+    if (!sobrietyIso) {
+      sobrietyIso = toDateString(new Date());
       await fetch('/api/recovery/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'sobriety_start', value: s }),
-      });
+        body: JSON.stringify({ key: 'sobriety_start', value: sobrietyIso }),
+      }).catch(() => { /* non-fatal */ });
     }
-    setStart(s);
-    const d = computeDays(s);
+    const sobrietyStartMs = new Date(sobrietyIso + 'T00:00:00').getTime();
+
+    const relapses = (Array.isArray(relapsesRes) ? relapsesRes : []) as Relapse[];
+    // /api/recovery/relapses returns newest-first per route convention; guard either way.
+    const latestRelapseMs = relapses
+      .map(r => new Date(r.created_at).getTime())
+      .reduce((max, t) => Math.max(max, t), 0);
+
+    const anchorMs = Math.max(sobrietyStartMs, latestRelapseMs);
+    const anchor = new Date(anchorMs).toISOString();
+    setAnchorIso(anchor);
+    const d = computeDaysFromIso(anchor);
     setDays(d);
     onStreakChange?.(d);
     setLoading(false);
   }
 
-  useEffect(() => { fetchStart(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadStreak(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -51,6 +84,9 @@ export default function StreakCard({ onStreakChange }: { onStreakChange?: (days:
       </div>
     );
   }
+
+  // The "since" label uses YYYY-MM-DD; convert the ISO anchor back into that shape.
+  const anchorDate = anchorIso.split('T')[0];
 
   return (
     <>
@@ -73,7 +109,7 @@ export default function StreakCard({ onStreakChange }: { onStreakChange?: (days:
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 10, fontFamily: 'var(--font-mono)' }}>
           days clean
         </div>
-        {start && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 22 }}>since {formatDate(start)}</div>}
+        {anchorDate && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 22 }}>since {formatDate(anchorDate)}</div>}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
           {MILESTONES.map(m => (
             <div key={m.days} className={`milestone-badge${days >= m.days ? ' earned' : ''}`}>{m.label}</div>

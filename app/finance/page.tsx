@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import EmptyState from '@/components/layout/EmptyState';
+import { useToast } from '@/components/layout/Toast';
 import ActivityLog from '@/components/finance/ActivityLog';
 import {
   Landmark, TrendingUp, Bitcoin, Boxes,
@@ -32,7 +33,7 @@ type Category = 'bank' | 'stocks' | 'crypto' | 'other';
 interface FinanceItem { id: string; category: Category; name: string; value: number }
 interface Subscription { id: string; name: string; amount: number; billing_cycle: string; next_renewal: string | null }
 interface PlaidAccount { account_id: string; name: string; official_name: string | null; mask: string | null; type: string; subtype: string; balances: { current: number | null; available: number | null } }
-interface PlaidConnection { institution_name: string | null; item_id: string; accounts: PlaidAccount[] }
+interface PlaidConnection { institution_name: string | null; item_id: string; accounts: PlaidAccount[]; synced_at?: string }
 interface SubCandidate { name: string; amount: number; billing_cycle: string; next_renewal: string; occurrences: number }
 interface PlaidTx { transaction_id: string; account_id?: string; merchant_name: string | null; name: string; amount: number; date: string; category: string[] | null; personal_finance_category?: { primary: string; detailed: string; confidence_level: string } | null; pending?: boolean }
 
@@ -413,6 +414,7 @@ function PlaidLinkButton({ onSuccess }: { onSuccess: () => void }) {
 }
 
 export default function FinancePage() {
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>('networth');
 
   // Net worth
@@ -534,20 +536,26 @@ export default function FinancePage() {
 
   async function syncAccount(item_id: string) {
     setSyncingIds(prev => new Set(prev).add(item_id));
-    const res = await fetch(`/api/plaid/accounts?item_id=${item_id}`);
-    const updated = await res.json() as PlaidConnection[];
-    setPlaidConns(prev => prev.map(c => {
-      const fresh = updated.find(u => u.item_id === c.item_id);
-      return fresh ?? c;
-    }));
-    // recompute total with updated connection merged in
-    const merged = plaidConns.map(c => { const f = updated.find(u => u.item_id === c.item_id); return f ?? c; });
-    const allAcc = merged.flatMap(c => c.accounts);
-    const isLiab = (a: PlaidAccount) => a.type === 'credit' || a.type === 'loan';
-    const assets = allAcc.filter(a => !isLiab(a)).reduce((s, a) => s + (a.balances.current ?? 0), 0);
-    const liabs = allAcc.filter(isLiab).reduce((s, a) => s + (a.balances.current ?? 0), 0);
-    await snapshotNW(manualTotal + assets - liabs);
-    setSyncingIds(prev => { const n = new Set(prev); n.delete(item_id); return n; });
+    try {
+      const res = await fetch(`/api/plaid/accounts?item_id=${item_id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = await res.json() as PlaidConnection[];
+      setPlaidConns(prev => prev.map(c => {
+        const fresh = updated.find(u => u.item_id === c.item_id);
+        return fresh ?? c;
+      }));
+      // recompute total with updated connection merged in
+      const merged = plaidConns.map(c => { const f = updated.find(u => u.item_id === c.item_id); return f ?? c; });
+      const allAcc = merged.flatMap(c => c.accounts);
+      const isLiab = (a: PlaidAccount) => a.type === 'credit' || a.type === 'loan';
+      const assets = allAcc.filter(a => !isLiab(a)).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+      const liabs = allAcc.filter(isLiab).reduce((s, a) => s + (a.balances.current ?? 0), 0);
+      await snapshotNW(manualTotal + assets - liabs);
+    } catch (e) {
+      toast({ kind: 'error', message: e instanceof Error ? `Sync failed: ${e.message}` : 'Sync failed' });
+    } finally {
+      setSyncingIds(prev => { const n = new Set(prev); n.delete(item_id); return n; });
+    }
   }
 
   useEffect(() => {
@@ -567,6 +575,22 @@ export default function FinancePage() {
       fetchTransactions();
     }
   }, [plaidConns.length, fetchTransactions]);
+
+  // Phase 4 #13: auto-refresh stale connections (>2h) when the tab regains focus.
+  useEffect(() => {
+    function onFocus() {
+      const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+      for (const conn of plaidConns) {
+        const stamp = conn.synced_at ? new Date(conn.synced_at).getTime() : 0;
+        if (stamp < cutoff && !syncingIds.has(conn.item_id)) {
+          syncAccount(conn.item_id);
+        }
+      }
+    }
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plaidConns]);
 
   useEffect(() => {
     const stored = localStorage.getItem('finance_monthly_income');
@@ -667,57 +691,73 @@ export default function FinancePage() {
   ]).filter(d => d.value > 0);
 
   // Net worth CRUD
+  // Small helper: write + surface failures, since most finance writes share this shape.
+  async function writeFinance(
+    label: string,
+    fn: () => Promise<Response>,
+    onSuccess: () => void,
+  ) {
+    try {
+      const res = await fn();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onSuccess();
+    } catch (e) {
+      toast({ kind: 'error', message: e instanceof Error ? `${label}: ${e.message}` : label });
+    }
+  }
+
   async function addItem(cat: Category) {
     if (!newItemName || !newItemValue) return;
-    await fetch('/api/finance/items', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category: cat, name: newItemName, value: Number(newItemValue) }),
-    });
-    setNewItemName(''); setNewItemValue(''); setAddingCat(null);
-    fetchItems();
+    await writeFinance("Couldn't add item",
+      () => fetch('/api/finance/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: cat, name: newItemName, value: Number(newItemValue) }),
+      }),
+      () => { setNewItemName(''); setNewItemValue(''); setAddingCat(null); fetchItems(); });
   }
 
   async function saveEdit() {
     if (!editId) return;
-    await fetch('/api/finance/items', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: editId, name: editName, value: Number(editValue) }),
-    });
-    setEditId(null);
-    fetchItems();
+    await writeFinance("Couldn't save",
+      () => fetch('/api/finance/items', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editId, name: editName, value: Number(editValue) }),
+      }),
+      () => { setEditId(null); fetchItems(); });
   }
 
   async function deleteItem(id: string) {
-    await fetch('/api/finance/items', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    fetchItems();
+    await writeFinance("Couldn't delete",
+      () => fetch('/api/finance/items', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      }),
+      () => fetchItems());
   }
 
   // Subscription CRUD
   async function addSub() {
     if (!subForm.name || !subForm.amount) return;
-    await fetch('/api/finance/subscriptions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(subForm),
-    });
-    setSubForm({ name: '', amount: '', billing_cycle: 'monthly', next_renewal: '' });
-    setAddingSub(false);
-    fetchSubs();
+    await writeFinance("Couldn't add subscription",
+      () => fetch('/api/finance/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(subForm),
+      }),
+      () => { setSubForm({ name: '', amount: '', billing_cycle: 'monthly', next_renewal: '' }); setAddingSub(false); fetchSubs(); });
   }
 
   async function deleteSub(id: string) {
-    await fetch('/api/finance/subscriptions', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    fetchSubs();
+    await writeFinance("Couldn't delete subscription",
+      () => fetch('/api/finance/subscriptions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      }),
+      () => fetchSubs());
   }
 
   async function scanTransactions() {
@@ -731,13 +771,13 @@ export default function FinancePage() {
   }
 
   async function confirmCandidate(c: SubCandidate) {
-    await fetch('/api/finance/subscriptions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: c.name, amount: c.amount, billing_cycle: c.billing_cycle, next_renewal: c.next_renewal }),
-    });
-    setDismissed(prev => new Set(prev).add(c.name));
-    fetchSubs();
+    await writeFinance("Couldn't add subscription",
+      () => fetch('/api/finance/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: c.name, amount: c.amount, billing_cycle: c.billing_cycle, next_renewal: c.next_renewal }),
+      }),
+      () => { setDismissed(prev => new Set(prev).add(c.name)); fetchSubs(); });
   }
 
   function dismissCandidate(name: string) {
@@ -745,15 +785,18 @@ export default function FinancePage() {
   }
 
   async function disconnectPlaid(item_id: string) {
-    await fetch('/api/plaid/accounts', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item_id }),
-    });
-    localStorage.removeItem('plaid_accounts');
-    localStorage.removeItem('plaid_transactions');
-    txFetched.current = false;
-    fetchPlaid();
+    await writeFinance("Couldn't disconnect",
+      () => fetch('/api/plaid/accounts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id }),
+      }),
+      () => {
+        localStorage.removeItem('plaid_accounts');
+        localStorage.removeItem('plaid_transactions');
+        txFetched.current = false;
+        fetchPlaid();
+      });
   }
 
   const tabs: { id: Tab; label: string }[] = [
@@ -1172,20 +1215,37 @@ export default function FinancePage() {
                     Connect your bank to automatically sync balances.
                   </p>
                 ) : (
-                  plaidConns.map(conn => (
-                    <div key={conn.item_id} className="finance-row">
-                      <span className="finance-row-name">{conn.institution_name ?? 'Bank'}</span>
-                      <button
-                        className="icon-btn"
-                        style={{ fontSize: 13 }}
-                        onClick={() => syncAccount(conn.item_id)}
-                        disabled={syncingIds.has(conn.item_id)}
-                        title="Sync"
-                        aria-label="Sync account"
-                      >{syncingIds.has(conn.item_id) ? '…' : <RotateCw size={13} strokeWidth={1.75} />}</button>
-                      <button className="icon-btn danger" style={{ fontSize: 12 }} onClick={() => disconnectPlaid(conn.item_id)} title="Disconnect">✕</button>
-                    </div>
-                  ))
+                  plaidConns.map(conn => {
+                    // Phase 4 #13: "synced Xm/h ago" tag from synced_at.
+                    let freshness = '';
+                    if (conn.synced_at) {
+                      const ms = Date.now() - new Date(conn.synced_at).getTime();
+                      const min = Math.round(ms / 60000);
+                      if (min < 1) freshness = 'just now';
+                      else if (min < 60) freshness = `${min}m ago`;
+                      else if (min < 60 * 24) freshness = `${Math.round(min / 60)}h ago`;
+                      else freshness = `${Math.round(min / (60 * 24))}d ago`;
+                    }
+                    return (
+                      <div key={conn.item_id} className="finance-row">
+                        <span className="finance-row-name">{conn.institution_name ?? 'Bank'}</span>
+                        {freshness && (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)', letterSpacing: '0.06em' }}>
+                            synced {freshness}
+                          </span>
+                        )}
+                        <button
+                          className="icon-btn"
+                          style={{ fontSize: 13 }}
+                          onClick={() => syncAccount(conn.item_id)}
+                          disabled={syncingIds.has(conn.item_id)}
+                          title="Sync"
+                          aria-label="Sync account"
+                        >{syncingIds.has(conn.item_id) ? '…' : <RotateCw size={13} strokeWidth={1.75} />}</button>
+                        <button className="icon-btn danger" style={{ fontSize: 12 }} onClick={() => disconnectPlaid(conn.item_id)} title="Disconnect">✕</button>
+                      </div>
+                    );
+                  })
                 )}
                 <PlaidLinkButton onSuccess={fetchPlaid} />
               </div>

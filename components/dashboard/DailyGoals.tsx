@@ -104,6 +104,9 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
 
   function notify(list: Goal[]) {
     onChangeRef.current?.(list.filter(g => g.done).length, list.length);
+    // Broadcast so GoalTicker (and any other sibling that listens) can re-sync
+    // immediately instead of waiting for its 3s poll.
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('goals-changed'));
   }
 
   async function toggleDone(g: Goal) {

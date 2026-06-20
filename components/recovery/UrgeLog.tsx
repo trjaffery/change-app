@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pencil, Plus, X, LifeBuoy } from 'lucide-react';
+import { useToast } from '@/components/layout/Toast';
 
 interface Urge { id: string; intensity: number; note: string; tags?: string[]; triggers?: string[]; halt?: string[]; is_crisis?: boolean; created_at: string }
 interface EditDraft { intensity: number; tags: Set<string>; note: string; is_crisis: boolean }
@@ -25,6 +26,7 @@ function parseRpPlanTriggers(s: string): string[] {
 }
 
 export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void }) {
+  const toast = useToast();
   const [urges, setUrges] = useState<Urge[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -112,17 +114,27 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
   }
 
   async function logUrge() {
-    await fetch('/api/recovery/urges', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ intensity, note, tags: [...selected], is_crisis: isCrisisDraft }),
-    });
-    setNote(''); setIntensity(3); setSelected(new Set()); setCustomInput(''); setCustomInputOpen(false); setIsCrisisDraft(false);
-    fetchUrges(urges.length + 1); onUrgeLogged?.();
+    try {
+      const res = await fetch('/api/recovery/urges', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intensity, note, tags: [...selected], is_crisis: isCrisisDraft }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setNote(''); setIntensity(3); setSelected(new Set()); setCustomInput(''); setCustomInputOpen(false); setIsCrisisDraft(false);
+      fetchUrges(urges.length + 1); onUrgeLogged?.();
+    } catch (e) {
+      toast({ kind: 'error', message: e instanceof Error ? `Couldn't log urge: ${e.message}` : "Couldn't log urge" });
+    }
   }
 
   async function deleteUrge(id: string) {
-    await fetch(`/api/recovery/urges/${id}`, { method: 'DELETE' });
-    fetchUrges(urges.length); onUrgeLogged?.();
+    try {
+      const res = await fetch(`/api/recovery/urges/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fetchUrges(urges.length); onUrgeLogged?.();
+    } catch {
+      toast({ kind: 'error', message: "Couldn't delete urge" });
+    }
   }
 
   function isCrisis(u: Urge): boolean {
@@ -161,7 +173,7 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
     if (!editingId || !draft || saving) return;
     setSaving(true);
     try {
-      await fetch(`/api/recovery/urges/${editingId}`, {
+      const res = await fetch(`/api/recovery/urges/${editingId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           intensity: draft.intensity,
@@ -170,9 +182,16 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
           is_crisis: draft.is_crisis,
         }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
       cancelEdit();
       fetchUrges(urges.length);
       onUrgeLogged?.();
+    } catch (e) {
+      // Phase 1 #4: keep panel open so the draft survives — user can retry.
+      toast({ kind: 'error', message: e instanceof Error ? `Couldn't save: ${e.message}` : "Couldn't save edit" });
     } finally { setSaving(false); }
   }
 

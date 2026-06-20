@@ -37,10 +37,14 @@ export async function GET(req: NextRequest) {
           }),
         });
         const data = res.ok ? await res.json() as { accounts?: PlaidAccount[] } : {};
+        // Phase 4 #13: stamp the synced-at time so the UI can show "synced Nh ago".
+        // We use server time at the moment of this Plaid call — it's the source of
+        // truth for "when did we last refresh balances for this item."
         return {
           institution_name: conn.institution_name as string | null,
           item_id: conn.item_id as string,
           accounts: (data.accounts ?? []) as PlaidAccount[],
+          synced_at: new Date().toISOString(),
           error: !res.ok ? `Plaid error ${res.status}` : undefined,
         };
       } catch {

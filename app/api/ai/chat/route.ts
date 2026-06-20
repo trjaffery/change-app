@@ -32,7 +32,13 @@ export async function POST(req: NextRequest) {
 
     const sb = supabaseServer();
     const context = await buildCoachContext(sb);
-    const system = `${SYSTEM_PROMPT_BASE}\n\n${context}`;
+    // Phase 3 #18: inject the running summary (updated after each turn) so the
+    // truncated 20-message window doesn't lose continuity across long chats.
+    const { data: state } = await sb.from('coach_session_state').select('summary').eq('id', 1).maybeSingle();
+    const summaryLine = state?.summary?.trim()
+      ? `\n\nCURRENT CHAT FOCUS (summary of this ongoing conversation): ${state.summary.trim()}`
+      : '';
+    const system = `${SYSTEM_PROMPT_BASE}\n\n${context}${summaryLine}`;
 
     // Cap context window: send the last 20 messages so a long conversation
     // doesn't run away with tokens. (System + data are always fresh anyway.)

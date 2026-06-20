@@ -12,6 +12,9 @@ import CrisisMode from '@/components/recovery/CrisisMode';
 
 export default function RecoveryPage() {
   const [urgeRefreshKey, setUrgeRefreshKey] = useState(0);
+  // Phase 1 #1: bump when a relapse is logged/deleted so StreakCard re-anchors
+  // to the most recent relapse (or sobriety_start, whichever is later).
+  const [streakRefreshKey, setStreakRefreshKey] = useState(0);
   const [crisisOpen, setCrisisOpen] = useState(false);
 
   function scrollTo(id: string) {
@@ -25,7 +28,7 @@ export default function RecoveryPage() {
     <>
       <h1 className="page-title">Recovery</h1>
 
-      <StreakCard />
+      <StreakCard refreshKey={streakRefreshKey} />
 
       <button
         onClick={() => setCrisisOpen(true)}
@@ -61,7 +64,7 @@ export default function RecoveryPage() {
 
       <UrgePatterns refreshKey={urgeRefreshKey} />
 
-      <RelapseLog />
+      <RelapseLog onRelapse={() => { setStreakRefreshKey(k => k + 1); setUrgeRefreshKey(k => k + 1); }} />
 
       <CrisisMode
         open={crisisOpen}

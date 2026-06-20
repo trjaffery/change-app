@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Markdown from '@/components/coach/Markdown';
+import { useToast } from '@/components/layout/Toast';
 
 interface ReviewData { summary: string; wins: string[]; improvements: string[]; plan: string[] }
 interface CacheResponse { week_start: string; review: ReviewData | null; generated_at: string | null }
@@ -16,6 +17,7 @@ function weekStartSunday(): string {
  * natural "end of week" window) it auto-generates in the background.
  */
 export default function WeeklyReview() {
+  const toast = useToast();
   const [data, setData] = useState<ReviewData | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -29,26 +31,32 @@ export default function WeeklyReview() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ week_start: weekStart }),
       });
-      const review = await res.json() as ReviewData;
+      const review = await res.json() as ReviewData & { error?: string };
+      if (!res.ok || review.error) throw new Error(review.error ?? `HTTP ${res.status}`);
       setData(review);
       setGeneratedAt(new Date().toISOString());
+    } catch (e) {
+      toast({ kind: 'error', message: e instanceof Error ? `Review failed: ${e.message}` : 'Review failed' });
     } finally { setLoading(false); }
   }
 
+  // Phase 3 #12: auto-trigger on first load of week if no cache yet, not just
+  // Sunday/Monday. Anyone opening the app mid-week should get this week's review.
   useEffect(() => {
     (async () => {
-      const res = await fetch(`/api/ai/weekly-review?week_start=${weekStart}`);
-      const cache = await res.json() as CacheResponse;
-      if (cache.review) {
-        setData(cache.review);
-        setGeneratedAt(cache.generated_at);
-        return;
-      }
-      const dow = new Date().getDay();
-      if ((dow === 0 || dow === 1) && !autoFired.current) {
-        autoFired.current = true;
-        regenerate();
-      }
+      try {
+        const res = await fetch(`/api/ai/weekly-review?week_start=${weekStart}`);
+        const cache = await res.json() as CacheResponse;
+        if (cache.review) {
+          setData(cache.review);
+          setGeneratedAt(cache.generated_at);
+          return;
+        }
+        if (!autoFired.current) {
+          autoFired.current = true;
+          regenerate();
+        }
+      } catch { /* silent — cache fetch failure shouldn't toast */ }
     })();
   }, [weekStart]); // eslint-disable-line react-hooks/exhaustive-deps
 

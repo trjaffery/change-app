@@ -4,17 +4,16 @@ import { getActiveDateString } from '@/lib/dates';
 
 interface Goal { id: string; text: string; done: boolean }
 
-// Polls every 8s — DailyGoals lives on the same page and updates its own state instantly,
-// but we want this ticker to stay in sync without prop-drilling. Cheap GET.
-const POLL_MS = 8000;
+// Polls every 3s as a safety net but most updates arrive instantly via the
+// 'goals-changed' window event that DailyGoals dispatches on mutate. Cheap GET.
+const POLL_MS = 3000;
 // How long each goal stays on screen before rotating to the next.
 const ROTATE_MS = 3500;
 
 export default function GoalTicker() {
   const today = getActiveDateString();
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [idx, setIdx] = useState(0);
-  const fadingRef = useRef(false);
+  const [shownId, setShownId] = useState<string | null>(null);
   const [fading, setFading] = useState(false);
 
   const fetchGoals = useCallback(async () => {
@@ -28,37 +27,50 @@ export default function GoalTicker() {
   useEffect(() => {
     fetchGoals();
     const id = setInterval(fetchGoals, POLL_MS);
-    return () => clearInterval(id);
+    function onMut() { fetchGoals(); }
+    window.addEventListener('goals-changed', onMut);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('goals-changed', onMut);
+    };
   }, [fetchGoals]);
 
   const pending = goals.filter(g => !g.done);
   const total = goals.length;
   const done = total - pending.length;
 
-  // Rotate through pending goals.
+  // Pick the next id to show. If the currently-shown id is still pending,
+  // keep it; otherwise advance to the next pending one in list order. This
+  // replaces the old "snap idx to 0" jank when the visible goal gets ticked.
+  const shownIdRef = useRef<string | null>(null);
+  useEffect(() => { shownIdRef.current = shownId; }, [shownId]);
+  useEffect(() => {
+    if (pending.length === 0) { setShownId(null); return; }
+    const stillThere = pending.find(g => g.id === shownIdRef.current);
+    if (!stillThere) setShownId(pending[0].id);
+  }, [pending]);
+
+  // Rotate through pending goals smoothly.
   useEffect(() => {
     if (pending.length <= 1) return;
     const id = setInterval(() => {
-      fadingRef.current = true;
       setFading(true);
       setTimeout(() => {
-        setIdx(i => (i + 1) % pending.length);
+        setShownId(curr => {
+          const i = pending.findIndex(g => g.id === curr);
+          const next = pending[(i + 1) % pending.length];
+          return next?.id ?? null;
+        });
         setFading(false);
-        fadingRef.current = false;
       }, 220);
     }, ROTATE_MS);
     return () => clearInterval(id);
-  }, [pending.length]);
-
-  // Clamp index if pending list shrinks (e.g. user just checked one off).
-  useEffect(() => {
-    if (idx >= pending.length && pending.length > 0) setIdx(0);
-  }, [pending.length, idx]);
+  }, [pending]);
 
   if (total === 0) return null;
 
   const allDone = pending.length === 0;
-  const current = pending[idx];
+  const current = pending.find(g => g.id === shownId) ?? pending[0];
   const tone = allDone ? '#6BE3A4' : '#F2C063';
 
   return (

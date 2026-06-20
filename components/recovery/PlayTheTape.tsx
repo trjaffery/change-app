@@ -1,7 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { FastForward } from 'lucide-react';
+import { FastForward, Copy, NotebookPen, RotateCcw } from 'lucide-react';
 import Markdown from '@/components/coach/Markdown';
+import { getActiveDateString } from '@/lib/dates';
+import { useToast } from '@/components/layout/Toast';
 
 /**
  * The "play the tape through" CBT exercise. User types what they're tempted
@@ -9,10 +11,52 @@ import Markdown from '@/components/coach/Markdown';
  * meets the morning-after consequence.
  */
 export default function PlayTheTape() {
+  const toast = useToast();
   const [situation, setSituation] = useState('');
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedToDiary, setSavedToDiary] = useState(false);
+
+  async function copyResponse() {
+    if (!response) return;
+    try {
+      await navigator.clipboard.writeText(response);
+      toast({ kind: 'success', message: 'Copied to clipboard' });
+    } catch {
+      toast({ kind: 'error', message: "Couldn't copy" });
+    }
+  }
+
+  async function saveToDiary() {
+    if (!response || savedToDiary) return;
+    const today = getActiveDateString();
+    try {
+      // Append the AI response to today's diary entry. Fetch first so we
+      // preserve whatever's already there.
+      const existing = await fetch(`/api/diary/${today}`).then(r => r.json()).catch(() => null);
+      const prev = (existing?.body ?? '').trim();
+      const stamp = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const block = `\n\n— Played the tape (${stamp}) —\nSituation: ${situation.trim()}\n\n${response}\n`;
+      const next = prev ? prev + block : block.trimStart();
+      const res = await fetch(`/api/diary/${today}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: next, mood: existing?.mood ?? null }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSavedToDiary(true);
+      toast({ kind: 'success', message: 'Saved to today\'s diary' });
+    } catch {
+      toast({ kind: 'error', message: "Couldn't save to diary" });
+    }
+  }
+
+  function clearAll() {
+    setSituation('');
+    setResponse(null);
+    setError(null);
+    setSavedToDiary(false);
+  }
 
   async function go() {
     if (!situation.trim() || loading) return;
@@ -85,16 +129,63 @@ export default function PlayTheTape() {
       {error && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--danger)' }}>Error: {error}</div>}
 
       {response && (
-        <div style={{
-          marginTop: 14,
-          padding: '14px 16px',
-          borderRadius: 10,
-          background: 'rgba(255,255,255,0.025)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6,
-        }}>
-          <Markdown text={response} />
-        </div>
+        <>
+          <div style={{
+            marginTop: 14,
+            padding: '14px 16px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.025)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6,
+          }}>
+            <Markdown text={response} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <button
+              onClick={copyResponse}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 12px', borderRadius: 8,
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 11,
+                letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <Copy size={11} strokeWidth={2} /> Copy
+            </button>
+            <button
+              onClick={saveToDiary}
+              disabled={savedToDiary}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 12px', borderRadius: 8,
+                background: savedToDiary ? 'rgba(107,227,164,0.1)' : 'transparent',
+                border: `1px solid ${savedToDiary ? 'rgba(107,227,164,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                color: savedToDiary ? 'var(--success)' : 'var(--text-tertiary)',
+                fontFamily: 'var(--font-mono)', fontSize: 11,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                cursor: savedToDiary ? 'default' : 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <NotebookPen size={11} strokeWidth={2} /> {savedToDiary ? 'Saved' : 'Save to diary'}
+            </button>
+            <button
+              onClick={clearAll}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 12px', borderRadius: 8,
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 11,
+                letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <RotateCcw size={11} strokeWidth={2} /> Clear
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
