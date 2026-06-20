@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { House, NotebookPen, Dumbbell, HeartPulse, Wallet, Brain, Settings, type LucideIcon } from 'lucide-react';
+import { House, NotebookPen, Dumbbell, HeartPulse, Wallet, Brain, type LucideIcon } from 'lucide-react';
 
 /**
  * Hybrid navigation.
@@ -20,7 +20,6 @@ const NAV: NavItem[] = [
   { href: '/recovery', Icon: HeartPulse,   label: 'Recovery' },
   { href: '/finance',  Icon: Wallet,       label: 'Finance' },
   { href: '/coach',    Icon: Brain,        label: 'Coach' },
-  { href: '/settings', Icon: Settings,     label: 'Settings' },
 ];
 
 export default function Sidebar() {

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Hanken_Grotesk, IBM_Plex_Mono, Instrument_Serif } from 'next/font/google';
 import './globals.css';
 import Sidebar from '@/components/layout/Sidebar';
+import SettingsButton from '@/components/layout/SettingsButton';
 import PageShell from '@/components/layout/PageShell';
 import { ToastProvider } from '@/components/layout/Toast';
 import ServiceWorkerRegister from '@/components/pwa/ServiceWorkerRegister';
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ServiceWorkerRegister />
           <div className="grain" aria-hidden />
           <Sidebar />
+          <SettingsButton />
           <main className="main-content">
             <PageShell>{children}</PageShell>
           </main>
