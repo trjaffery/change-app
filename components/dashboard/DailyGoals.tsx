@@ -243,6 +243,20 @@ export default function DailyGoals({ onChange }: { onChange?: (done: number, tot
     gestureRef.current = null;
   }
 
+  // iOS Safari fix: React's onPointer* listeners are passive, so
+  // preventDefault() inside them can't actually block touch-scroll. Once
+  // long-press promotes a row to reorder mode, attach a non-passive
+  // touchmove listener so vertical finger movement updates the drag instead
+  // of scrolling the page.
+  useEffect(() => {
+    if (draggedId === null) return;
+    function onTouchMove(e: TouchEvent) {
+      if (e.cancelable) e.preventDefault();
+    }
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => document.removeEventListener('touchmove', onTouchMove);
+  }, [draggedId]);
+
   async function commitReorder(_id: string, from: number, to: number) {
     const next = [...goals];
     const [moved] = next.splice(from, 1);
