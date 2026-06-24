@@ -32,6 +32,8 @@ interface Prefs {
   urge_checkin_hours: number[];
   quiet_hours_start: string | null;
   quiet_hours_end: string | null;
+  goal_evening_enabled: boolean;
+  goal_evening_time: string;
 }
 
 interface LocalNow {
@@ -104,16 +106,22 @@ async function send(sb: SupabaseClient, kind: string, key: string, payload: Push
 async function dispatchHabitReminders(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
   if (!prefs.habit_reminders_enabled) return;
 
-  // All habits with a reminder time that match the current window. We pull
-  // them all and filter in-memory — habits table is tiny.
+  // Pull every habit that has any reminder configured (single OR multi).
+  // We filter in-memory — the habits table is tiny.
   const { data: habits } = await sb.from('habits')
-    .select('id, name, reminder_time, schedule_type, schedule_days, goal_value, goal_period')
-    .is('archived_at', null)
-    .not('reminder_time', 'is', null);
+    .select('id, name, reminder_time, reminder_times, schedule_type, schedule_days, goal_value, goal_period')
+    .is('archived_at', null);
 
   for (const h of habits ?? []) {
-    const rt = h.reminder_time as string;
-    if (!within(now.minutes, timeToMinutes(rt))) continue;
+    // Multi-time wins if set; otherwise fall back to the legacy single field.
+    const times = ((h.reminder_times as string[] | null) ?? []).filter(Boolean);
+    if (times.length === 0 && h.reminder_time) times.push(h.reminder_time as string);
+    if (times.length === 0) continue;
+
+    // Which (if any) configured time matches the current 5-min window?
+    const slotIdx = times.findIndex(t => within(now.minutes, timeToMinutes(t)));
+    if (slotIdx === -1) continue;
+    const slotTime = times[slotIdx].slice(0, 5);
 
     // Respect the habit's schedule — don't ping on off-days.
     if (h.schedule_type === 'specific_days_week') {
@@ -122,14 +130,32 @@ async function dispatchHabitReminders(sb: SupabaseClient, prefs: Prefs, now: Loc
     }
 
     // Skip if already complete today (only meaningful for daily-goal habits).
+    // For multi-time habits with goal_value > 1, this also gracefully stops
+    // pings once they've hit count — e.g. water 5/5 won't trigger the 6pm slot.
     if (h.goal_period === 'day') {
       const { data: c } = await sb.from('habit_completions')
         .select('count').eq('habit_id', h.id).eq('date', now.date).maybeSingle();
       const done = (c?.count as number | undefined) ?? 0;
       if (done >= (h.goal_value as number)) continue;
+
+      // Body shows progress for multi-count habits so the user knows where they are.
+      const goal = h.goal_value as number;
+      const body = goal > 1
+        ? `${done}/${goal} so far — time for another.`
+        : 'Reminder — keep the promise.';
+
+      // Per-slot dedup so each scheduled time gets its own shot per day.
+      await send(sb, 'habit-reminder', `${h.id}:${now.date}:${slotTime}`, {
+        title: h.name as string,
+        body,
+        url: '/',
+        tag: `habit-${h.id}`,
+      });
+      continue;
     }
 
-    await send(sb, 'habit-reminder', `${h.id}:${now.date}`, {
+    // Weekly / monthly goal habits: simple message, slot-scoped dedup.
+    await send(sb, 'habit-reminder', `${h.id}:${now.date}:${slotTime}`, {
       title: h.name as string,
       body: 'Reminder — keep the promise.',
       url: '/',
@@ -142,10 +168,11 @@ async function dispatchDigest(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
   if (!prefs.digest_enabled) return;
   if (!within(now.minutes, timeToMinutes(prefs.digest_time))) return;
 
-  const [habitsRes, splitsRes, subsRes] = await Promise.all([
+  const [habitsRes, splitsRes, subsRes, goalsRes] = await Promise.all([
     sb.from('habits').select('id, schedule_type, schedule_days, goal_value, goal_period').is('archived_at', null),
     sb.from('splits').select('split_days(name, day_of_week)').eq('is_active', true).limit(1),
     sb.from('finance_subscriptions').select('name, amount, next_renewal'),
+    sb.from('goals').select('done').eq('date', now.date),
   ]);
 
   const habits = (habitsRes.data ?? []).filter(h => {
@@ -164,8 +191,14 @@ async function dispatchDigest(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
   const tomorrow = new Date(todayDate.getTime() + 86400000).toISOString().split('T')[0];
   const renewingTomorrow = (subsRes.data ?? []).filter(s => s.next_renewal === tomorrow);
 
+  // Goals for today (entered the previous evening or set just now). The digest
+  // mentions any unfinished count so the morning summary feels complete.
+  const goals = goalsRes.data ?? [];
+  const pendingGoals = goals.filter(g => !g.done).length;
+
   const lines: string[] = [];
   if (habits.length) lines.push(`${habits.length} habit${habits.length === 1 ? '' : 's'} due`);
+  if (pendingGoals) lines.push(`${pendingGoals} goal${pendingGoals === 1 ? '' : 's'}`);
   if (todaySplit) lines.push(`${todaySplit.name}`);
   if (renewingTomorrow.length) {
     const total = renewingTomorrow.reduce((s, x) => s + Number(x.amount), 0);
@@ -253,6 +286,24 @@ async function dispatchMilestones(sb: SupabaseClient, prefs: Prefs, now: LocalNo
   });
 }
 
+async function dispatchGoalEvening(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
+  if (!prefs.goal_evening_enabled) return;
+  if (!within(now.minutes, timeToMinutes(prefs.goal_evening_time))) return;
+
+  const { data: goals } = await sb.from('goals').select('done').eq('date', now.date);
+  const all = goals ?? [];
+  if (all.length === 0) return;             // no goals set today — silent
+  const pending = all.filter(g => !g.done).length;
+  if (pending === 0) return;                // all checked off — nothing to nag about
+
+  await send(sb, 'goal-evening', now.date, {
+    title: pending === 1 ? '1 goal left' : `${pending} goals left`,
+    body: 'Couple hours left to finish today\'s list.',
+    url: '/',
+    tag: 'goal-evening',
+  });
+}
+
 async function dispatchUrgeCheckins(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
   if (!prefs.urge_checkins_enabled) return;
   if (!prefs.urge_checkin_hours.includes(now.hour)) return;
@@ -293,6 +344,8 @@ export async function runNotificationTick(): Promise<{ ok: true; tz: string; loc
     urge_checkin_hours: prefs.urge_checkin_hours ?? [22, 23],
     quiet_hours_start: prefs.quiet_hours_start ?? null,
     quiet_hours_end: prefs.quiet_hours_end ?? null,
+    goal_evening_enabled: prefs.goal_evening_enabled ?? true,
+    goal_evening_time: prefs.goal_evening_time ?? '20:00:00',
   };
 
   const now = localNow(merged.timezone, new Date());
@@ -309,6 +362,7 @@ export async function runNotificationTick(): Promise<{ ok: true; tz: string; loc
     dispatchWorkoutReminder(sb, merged, now),
     dispatchSubscriptionWarnings(sb, merged, now),
     dispatchMilestones(sb, merged, now),
+    dispatchGoalEvening(sb, merged, now),
     dispatchUrgeCheckins(sb, merged, now),
   ]);
 

@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
 
   const { data: habits, error } = await sb
     .from('habits')
-    .select('id, name, color, goal_value, goal_period')
+    .select('id, name, color, goal_value, goal_period, schedule_type, schedule_days, schedule_count, created_at')
     .is('archived_at', null)
     .order('position', { ascending: true });
 

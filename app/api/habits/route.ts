@@ -123,7 +123,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const sb = supabaseServer();
-  const { name, color, schedule_type, schedule_days, schedule_count, goal_period, goal_value, reminder_time } = await req.json();
+  const { name, color, schedule_type, schedule_days, schedule_count, goal_period, goal_value, reminder_time, reminder_times } = await req.json();
   if (!name) return NextResponse.json({ error: 'name required' }, { status: 400 });
 
   const { data: last } = await sb
@@ -145,6 +145,7 @@ export async function POST(req: NextRequest) {
       goal_period: goal_period ?? 'day',
       goal_value: goal_value ?? 1,
       reminder_time: reminder_time ?? null,
+      reminder_times: Array.isArray(reminder_times) && reminder_times.length ? reminder_times : null,
     })
     .select()
     .single();

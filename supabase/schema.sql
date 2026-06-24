@@ -275,6 +275,16 @@ CREATE INDEX IF NOT EXISTS push_subscriptions_created_idx ON push_subscriptions(
 -- against notification_prefs.timezone at send time). NULL = no reminder.
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS reminder_time TIME;
 
+-- Stage 3: multiple reminders per habit (e.g. drink water 5x/day → 9am, 12pm, 3pm, 6pm).
+-- reminder_time is kept for back-compat; if reminder_times is non-empty it wins.
+-- Empty array = no reminders; NULL is treated the same as empty.
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS reminder_times TIME[];
+-- One-time migration: copy any existing single-time reminder into the new array.
+UPDATE habits
+   SET reminder_times = ARRAY[reminder_time]
+ WHERE reminder_time IS NOT NULL
+   AND (reminder_times IS NULL OR cardinality(reminder_times) = 0);
+
 -- Stage 2: notification preferences. Singleton row (id=1). Quiet hours suppress
 -- everything except crisis-flagged pushes; digest/workout times use the configured
 -- timezone for clock matching.
@@ -295,6 +305,12 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 INSERT INTO notification_prefs(id) VALUES(1) ON CONFLICT DO NOTHING;
+
+-- Stage 3: goal alerts. Evening check-in fires at goal_evening_time if any
+-- of today's goals are still unchecked. The morning digest already includes
+-- a "N goals to hit" line — this is the second-half-of-day nudge.
+ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS goal_evening_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS goal_evening_time TIME NOT NULL DEFAULT '20:00';
 
 -- Stage 2: dedup log so cron doesn't double-fire a digest or milestone in the
 -- same window. Keyed by (kind, key) — e.g. ('digest', '2026-06-21') or

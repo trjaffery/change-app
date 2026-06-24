@@ -19,6 +19,7 @@ const ALLOWED_KEYS = new Set([
   'streak_milestones_enabled',
   'urge_checkins_enabled', 'urge_checkin_hours',
   'quiet_hours_start', 'quiet_hours_end',
+  'goal_evening_enabled', 'goal_evening_time',
 ]);
 
 export async function PUT(req: NextRequest) {

@@ -21,6 +21,31 @@ interface HabitMeta {
   color: string;
   goal_value: number;
   goal_period: string;
+  schedule_type: string;
+  schedule_days: number[] | null;
+  schedule_count: number | null;
+  created_at: string | null;
+}
+
+/**
+ * Is the habit "due" on a given ISO date (YYYY-MM-DD)? Mirrors the logic
+ * in app/api/habits/route.ts so the calendar's denominator matches what
+ * the Habits list considers a scheduled day.
+ *
+ *   • daily — always due
+ *   • specific_days_week / specific_days_month — only on listed days
+ *   • days_per_week / days_per_month — treated as "due any day" for the
+ *     trailing pill, since the user picks which days to do them on. The
+ *     denominator there is min(days_visible, schedule_count) so the pill
+ *     reads against the period target rather than 7.
+ */
+function isDueOnDate(habit: HabitMeta, dateStr: string): boolean {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  switch (habit.schedule_type) {
+    case 'specific_days_week':  return habit.schedule_days?.includes(d.getUTCDay()) ?? false;
+    case 'specific_days_month': return habit.schedule_days?.includes(d.getUTCDate()) ?? false;
+    default: return true;
+  }
 }
 
 interface CalendarData {
@@ -122,6 +147,8 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
         }
         .cal-cell.today { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.5); }
         .cal-cell.future { opacity: 0.45; }
+        .cal-cell.off-day { background: transparent; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
+        .cal-cell.off-day.today { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.3); }
         .cal-cell:hover { transform: translateY(-1px); }
 
         .cal-tail {
@@ -204,9 +231,23 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
         {/* Habit rows */}
         {data.habits.map(habit => {
           const habitCompletions = data.completions[habit.id] ?? {};
-          // Days where the goal was met in the visible range.
-          const daysHit = dates.reduce((sum, d) => sum + ((habitCompletions[d] ?? 0) >= habit.goal_value ? 1 : 0), 0);
-          const daysVisible = dates.filter(d => d <= today).length;
+          const createdAt = (habit.created_at ?? '').split('T')[0];
+
+          // A date counts toward the denominator only if the habit was already
+          // created AND scheduled on that day. For "N days per week/month" we
+          // use schedule_count as a cap so the pill reads against the period
+          // target rather than a calendar denominator.
+          const eligibleDates = dates.filter(d =>
+            d <= today
+            && (!createdAt || d >= createdAt)
+            && isDueOnDate(habit, d),
+          );
+          const daysHit = eligibleDates.reduce(
+            (sum, d) => sum + ((habitCompletions[d] ?? 0) >= habit.goal_value ? 1 : 0), 0);
+          let daysVisible = eligibleDates.length;
+          if ((habit.schedule_type === 'days_per_week' || habit.schedule_type === 'days_per_month') && habit.schedule_count) {
+            daysVisible = Math.min(daysVisible, habit.schedule_count);
+          }
 
           return (
             <div
@@ -228,6 +269,18 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
                   const opacity = fill(count, habit.goal_value);
                   const isToday = date === today;
                   const isFuture = date > today;
+                  const isDue = isDueOnDate(habit, date);
+                  // "Off day" — habit isn't scheduled that day. Render a barely-
+                  // there cell so the row stays aligned but reads as not-applicable.
+                  if (!isDue) {
+                    return (
+                      <div
+                        key={date}
+                        className={`cal-cell off-day${isToday ? ' today' : ''}`}
+                        title={`Not scheduled — ${date}`}
+                      />
+                    );
+                  }
                   return (
                     <div
                       key={date}

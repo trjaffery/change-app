@@ -15,6 +15,8 @@ interface Prefs {
   urge_checkin_hours: number[];
   quiet_hours_start: string | null;
   quiet_hours_end: string | null;
+  goal_evening_enabled: boolean;
+  goal_evening_time: string;
 }
 
 const DEFAULTS: Prefs = {
@@ -30,6 +32,8 @@ const DEFAULTS: Prefs = {
   urge_checkin_hours: [22, 23],
   quiet_hours_start: null,
   quiet_hours_end: null,
+  goal_evening_enabled: true,
+  goal_evening_time: '20:00',
 };
 
 // DB returns 'HH:MM:SS'; <input type="time"> wants 'HH:MM'.
@@ -52,6 +56,7 @@ export default function NotificationPrefsCard() {
             ...data,
             digest_time: toInput(data.digest_time),
             workout_reminder_time: toInput(data.workout_reminder_time),
+            goal_evening_time: toInput(data.goal_evening_time) || '20:00',
             quiet_hours_start: data.quiet_hours_start ? toInput(data.quiet_hours_start) : null,
             quiet_hours_end: data.quiet_hours_end ? toInput(data.quiet_hours_end) : null,
           });
@@ -117,6 +122,17 @@ export default function NotificationPrefsCard() {
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>at</span>
           <input type="time" className="np-time" value={prefs.workout_reminder_time}
                  onChange={e => save({ workout_reminder_time: e.target.value })} />
+        </div>
+      )}
+
+      <Row title="Evening goal check-in" desc="If any of today's goals are still unchecked">
+        <Toggle on={prefs.goal_evening_enabled} onChange={v => save({ goal_evening_enabled: v })} />
+      </Row>
+      {prefs.goal_evening_enabled && (
+        <div className="np-inline-time">
+          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>at</span>
+          <input type="time" className="np-time" value={prefs.goal_evening_time}
+                 onChange={e => save({ goal_evening_time: e.target.value })} />
         </div>
       )}
 
