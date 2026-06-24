@@ -443,6 +443,31 @@ export default function HabitList({
     })));
   }
 
+  // iOS Safari fix: React's onPointer* listeners are passive, so
+  // preventDefault() inside them can't actually block touch-scroll. We have
+  // to attach non-passive native listeners.
+  //   • touchstart on a drag handle → preventDefault so iOS never enters
+  //     scroll mode in the first place.
+  //   • touchmove while a row is being dragged → preventDefault so vertical
+  //     finger movement updates the drag instead of scrolling the page.
+  useEffect(() => {
+    function onTouchStart(e: TouchEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-drag-handle]')) e.preventDefault();
+    }
+    document.addEventListener('touchstart', onTouchStart, { passive: false });
+    return () => document.removeEventListener('touchstart', onTouchStart);
+  }, []);
+
+  useEffect(() => {
+    if (draggedId === null) return;
+    function onTouchMove(e: TouchEvent) {
+      if (e.cancelable) e.preventDefault();
+    }
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => document.removeEventListener('touchmove', onTouchMove);
+  }, [draggedId]);
+
   // Close revealed row when clicking elsewhere on the page.
   useEffect(() => {
     if (!revealedId) return;
@@ -473,7 +498,8 @@ export default function HabitList({
         /* Drag handle — touch-action: none so iOS doesn't steal the gesture
            for page scroll before our pointermove fires. Tap target is at least
            28px wide for finger-friendliness. */
-        .habit-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 36px; margin-right: -6px; color: var(--text-tertiary); cursor: grab; flex-shrink: 0; touch-action: none; -webkit-tap-highlight-color: transparent; opacity: 0.55; transition: opacity 160ms ease, color 160ms ease; }
+        .habit-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 40px; margin-right: -8px; color: var(--text-tertiary); cursor: grab; flex-shrink: 0; touch-action: none; -webkit-tap-highlight-color: transparent; opacity: 0.55; transition: opacity 160ms ease, color 160ms ease; }
+        .habit-drag-handle * { touch-action: none; pointer-events: none; }
         .habit-drag-handle:hover { opacity: 1; color: var(--text-secondary); }
         .habit-drag-handle:active { cursor: grabbing; opacity: 1; }
         @keyframes drop-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
