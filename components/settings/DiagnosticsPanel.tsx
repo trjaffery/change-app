@@ -146,7 +146,18 @@ export default function DiagnosticsPanel() {
 
               <div className="diag-section">
                 <div className="diag-section-title">Now</div>
-                <div className="diag-row"><span className="k">timezone</span><span className="v">{diag.tz}</span></div>
+                <div className="diag-row">
+                  <span className="k">timezone</span>
+                  <span className={`v ${typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().timeZone === diag.tz ? 'good' : 'warn'}`}>
+                    {diag.tz}
+                  </span>
+                </div>
+                {typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().timeZone !== diag.tz && (
+                  <div className="diag-row">
+                    <span className="k">browser tz</span>
+                    <span className="v warn">{Intl.DateTimeFormat().resolvedOptions().timeZone} ≠ saved</span>
+                  </div>
+                )}
                 <div className="diag-row"><span className="k">local time</span><span className="v">{diag.localTime}</span></div>
                 <div className="diag-row"><span className="k">local date</span><span className="v">{diag.localDate}</span></div>
               </div>

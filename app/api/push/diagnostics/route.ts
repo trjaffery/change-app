@@ -73,8 +73,10 @@ export async function GET() {
       if (h.schedule_type === 'specific_days_week') {
         scheduledToday = scheduledDays?.includes(dow) ?? false;
       }
-      const dedupKey = `${h.id}:${localDate}`;
-      const firedToday = log.some(l => l.kind === 'habit-reminder' && l.key === dedupKey);
+      // Dispatcher writes keys as `${habit.id}:${date}:${slotTime}` (per-slot).
+      // Match by prefix so a habit with any slot fired today reads as "sent".
+      const dedupPrefix = `${h.id}:${localDate}:`;
+      const firedToday = log.some(l => l.kind === 'habit-reminder' && l.key.startsWith(dedupPrefix));
       return {
         name: h.name,
         reminderTime: (h.reminder_time as string).slice(0, 5),

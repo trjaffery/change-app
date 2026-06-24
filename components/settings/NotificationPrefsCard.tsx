@@ -51,9 +51,26 @@ export default function NotificationPrefsCard() {
         const res = await fetch('/api/notification-prefs');
         const data = await res.json();
         if (data && typeof data === 'object' && data.timezone) {
+          // Auto-sync the saved tz to the browser's actual tz. Without this,
+          // saved times like "07:00" are interpreted in the default tz
+          // (America/Chicago) and fire at the wrong wall-clock moment for
+          // anyone not in CDT/CST.
+          let tz = data.timezone as string;
+          const browserTz = typeof Intl !== 'undefined'
+            ? Intl.DateTimeFormat().resolvedOptions().timeZone
+            : null;
+          if (browserTz && browserTz !== tz) {
+            tz = browserTz;
+            fetch('/api/notification-prefs', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ timezone: browserTz }),
+            }).catch(() => { /* best effort */ });
+          }
           setPrefs({
             ...DEFAULTS,
             ...data,
+            timezone: tz,
             digest_time: toInput(data.digest_time),
             workout_reminder_time: toInput(data.workout_reminder_time),
             goal_evening_time: toInput(data.goal_evening_time) || '20:00',
