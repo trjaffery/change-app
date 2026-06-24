@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const TOKEN = process.env.APP_TOKEN;
 const COOKIE = 'app_token';
-const PUBLIC_PATHS = ['/login', '/api/auth'];
+// /api/cron has its own bearer-auth via CRON_SECRET — letting it through the
+// cookie gate is the only way GitHub Actions can call it without holding our
+// session cookie. The route handler itself rejects anything without the secret.
+const PUBLIC_PATHS = ['/login', '/api/auth', '/api/cron'];
 
 export default function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
