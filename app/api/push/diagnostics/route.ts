@@ -31,12 +31,19 @@ export async function GET() {
     prefsRes,
     logRes,
     habitsRes,
+    heartbeatRes,
   ] = await Promise.all([
     sb.from('push_subscriptions').select('id, created_at, last_used_at, user_agent').order('created_at', { ascending: false }),
     sb.from('notification_prefs').select('*').eq('id', 1).maybeSingle(),
     sb.from('notification_log').select('kind, key, sent_at').order('sent_at', { ascending: false }).limit(20),
-    sb.from('habits').select('id, name, reminder_time, schedule_type, schedule_days').is('archived_at', null),
+    sb.from('habits').select('id, name, reminder_time, reminder_times, schedule_type, schedule_days').is('archived_at', null),
+    sb.from('cron_heartbeat').select('last_tick_at').eq('id', 1).maybeSingle(),
   ]);
+
+  const heartbeatIso = (heartbeatRes.data as { last_tick_at?: string } | null)?.last_tick_at ?? null;
+  const heartbeatAgeMin = heartbeatIso
+    ? Math.round((now.getTime() - new Date(heartbeatIso).getTime()) / 60000)
+    : null;
 
   const prefs = (prefsRes.data ?? {}) as Record<string, unknown>;
   const tz = (prefs.timezone as string) || 'America/Chicago';
@@ -97,5 +104,6 @@ export async function GET() {
     habitReminders,
     recentLog: log,
     lastLogAgeMin,
+    heartbeat: { iso: heartbeatIso, ageMin: heartbeatAgeMin },
   });
 }

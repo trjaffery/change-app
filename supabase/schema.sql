@@ -312,6 +312,15 @@ INSERT INTO notification_prefs(id) VALUES(1) ON CONFLICT DO NOTHING;
 ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS goal_evening_enabled BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS goal_evening_time TIME NOT NULL DEFAULT '20:00';
 
+-- Stage 3: cron heartbeat. Singleton row updated on every dispatcher tick so
+-- diagnostics can show "cron last fired Xm ago" even when no notification
+-- was actually sent (e.g. nothing matched the current time window).
+CREATE TABLE IF NOT EXISTS cron_heartbeat (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  last_tick_at TIMESTAMPTZ
+);
+INSERT INTO cron_heartbeat(id) VALUES(1) ON CONFLICT DO NOTHING;
+
 -- Stage 2: dedup log so cron doesn't double-fire a digest or milestone in the
 -- same window. Keyed by (kind, key) — e.g. ('digest', '2026-06-21') or
 -- ('habit-reminder', '<habit_id>:2026-06-21') or ('milestone', '30:2026-06-21').

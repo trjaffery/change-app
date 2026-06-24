@@ -16,6 +16,7 @@ interface Diag {
   habitReminders: { name: string; reminderTime: string; scheduledToday: boolean; firedToday: boolean }[];
   recentLog: { kind: string; key: string; sent_at: string }[];
   lastLogAgeMin: number | null;
+  heartbeat: { iso: string | null; ageMin: number | null };
 }
 
 const TEST_KINDS: { kind: string; label: string }[] = [
@@ -152,12 +153,22 @@ export default function DiagnosticsPanel() {
 
               <div className="diag-section">
                 <div className="diag-section-title">Cron health</div>
+                <div className="diag-row">
+                  <span className="k">cron tick</span>
+                  {diag.heartbeat.ageMin === null ? (
+                    <span className="v bad">never — cron not reaching app</span>
+                  ) : (
+                    <span className={`v ${diag.heartbeat.ageMin <= 10 ? 'good' : diag.heartbeat.ageMin <= 60 ? 'warn' : 'bad'}`}>
+                      {diag.heartbeat.ageMin}m ago
+                    </span>
+                  )}
+                </div>
                 {diag.lastLogAgeMin === null ? (
-                  <div className="diag-row"><span className="k">last dispatch</span><span className="v warn">no rows yet</span></div>
+                  <div className="diag-row"><span className="k">last push sent</span><span className="v">none yet</span></div>
                 ) : (
                   <div className="diag-row">
-                    <span className="k">last dispatch</span>
-                    <span className={`v ${diag.lastLogAgeMin <= 10 ? 'good' : diag.lastLogAgeMin <= 60 ? 'warn' : 'bad'}`}>{diag.lastLogAgeMin}m ago</span>
+                    <span className="k">last push sent</span>
+                    <span className={`v ${diag.lastLogAgeMin <= 60 ? 'good' : 'warn'}`}>{diag.lastLogAgeMin}m ago</span>
                   </div>
                 )}
                 <div className="diag-row" style={{ alignItems: 'flex-start' }}>

@@ -1,0 +1,52 @@
+name: Notification cron
+
+# Fires every 5 minutes. GitHub Actions cron has a published minimum of 5 min
+# and is best-effort — it can be delayed by a few minutes under platform load.
+# That's fine for habit/digest pushes since the dispatcher accepts a ±5 min
+# window, but it does mean we can occasionally miss a 5-min slot. If we ever
+# need strict timing, swap this for an external service like cron-job.org.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:        # also lets you fire it manually from the Actions tab
+
+# Don't pile up if a previous run is still going (and a slow run shouldn't
+# block the next legitimate tick).
+concurrency:
+  group: notifications-cron
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping notifications endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::APP_URL or CRON_SECRET secret is missing in repo settings."
+            exit 1
+          fi
+          # -sS: silent but show errors. -w: print status code on its own line so
+          # we can fail the job when the app returns non-2xx (otherwise curl exit
+          # 0 hides a 401/500 etc).
+          response=$(curl -sS -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP_STATUS:%{http_code}" \
+            "${APP_URL%/}/api/cron/notifications")
+          status=$(echo "$response" | sed -n 's/^HTTP_STATUS://p')
+          body=$(echo "$response" | sed '/^HTTP_STATUS:/d')
+          echo "status=$status"
+          echo "body=$body"
+          if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+            exit 0
+          fi
+          echo "::error::Dispatch failed with HTTP $status"
+          exit 1

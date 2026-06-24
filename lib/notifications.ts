@@ -328,6 +328,11 @@ async function dispatchUrgeCheckins(sb: SupabaseClient, prefs: Prefs, now: Local
 
 export async function runNotificationTick(): Promise<{ ok: true; tz: string; localTime: string }> {
   const sb = supabaseServer();
+  // Heartbeat: write *before* any other work so even a dispatcher crash
+  // mid-tick still leaves a "cron is alive" timestamp for diagnostics.
+  await sb.from('cron_heartbeat')
+    .upsert({ id: 1, last_tick_at: new Date().toISOString() }, { onConflict: 'id' });
+
   const { data: prefsRow } = await sb.from('notification_prefs').select('*').eq('id', 1).maybeSingle();
   const prefs = (prefsRow ?? {}) as Partial<Prefs>;
 
