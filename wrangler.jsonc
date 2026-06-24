@@ -10,10 +10,11 @@
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
 	},
-	// Drives the notification dispatcher every 5 minutes. Cloudflare cron
-	// is reliable to the minute, unlike GitHub Actions free-tier schedule
-	// which drops most ticks under load.
+	// Drives the notification dispatcher every minute so pushes land
+	// within ~60 seconds of the user's configured time. Cloudflare cron
+	// is reliable to the minute, and the dispatcher early-returns on
+	// any tick that doesn't match a scheduled slot — cost is negligible.
 	"triggers": {
-		"crons": ["*/5 * * * *"]
+		"crons": ["* * * * *"]
 	}
 }

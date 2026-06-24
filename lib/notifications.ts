@@ -16,7 +16,11 @@ import { supabaseServer } from '@/lib/supabase';
  * each scheduled time gets exactly one shot per day.
  */
 
-const WINDOW_MIN = 5;
+// Tightened from ±5 to ±1 once cron moved from GitHub Actions (5-min
+// cadence, frequently delayed) to Cloudflare Cron Triggers (every minute,
+// reliable). A user-set time of 17:27 now fires from the 17:27 tick
+// rather than potentially the 17:25 or 17:30 tick.
+const WINDOW_MIN = 1;
 const MILESTONES = [7, 14, 30, 60, 90, 180, 365];
 
 interface Prefs {
