@@ -33,6 +33,11 @@ export default function Sidebar() {
           backdrop-filter: blur(22px) saturate(1.2);
           -webkit-backdrop-filter: blur(22px) saturate(1.2);
           background: rgba(5,5,6,0.78);
+          /* Promote to its own compositor layer — without this, iOS Safari
+             tears the bar mid-scroll when combined with backdrop-filter. */
+          transform: translateZ(0);
+          -webkit-transform: translateZ(0);
+          will-change: transform;
         }
 
         /* ── Desktop: collapsed rail, expands on hover ─────────────────── */

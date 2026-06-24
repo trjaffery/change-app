@@ -32,12 +32,17 @@ export default function SettingsButton() {
           text-decoration: none;
           transition: color 160ms ease, background 160ms ease, transform 160ms ease;
           -webkit-tap-highlight-color: transparent;
+          /* Force own compositor layer so iOS Safari doesn't tear the
+             backdrop-blurred FAB during momentum scroll. */
+          transform: translateZ(0);
+          -webkit-transform: translateZ(0);
+          will-change: transform;
         }
         .settings-fab:hover {
           color: var(--text-primary);
           background: rgba(5,5,6,0.78);
         }
-        .settings-fab:active { transform: scale(0.95); }
+        .settings-fab:active { transform: translateZ(0) scale(0.95); }
         /* On desktop the sidebar already exists; offset slightly so the gear
            doesn't sit flush against the top-right where window controls are. */
         @media (min-width: 641px) {
