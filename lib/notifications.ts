@@ -142,7 +142,7 @@ async function dispatchHabitReminders(sb: SupabaseClient, prefs: Prefs, now: Loc
       const goal = h.goal_value as number;
       const body = goal > 1
         ? `${done}/${goal} so far — time for another.`
-        : 'Reminder — keep the promise.';
+        : 'Keep the promise.';
 
       // Per-slot dedup so each scheduled time gets its own shot per day.
       await send(sb, 'habit-reminder', `${h.id}:${now.date}:${slotTime}`, {
@@ -207,7 +207,7 @@ async function dispatchDigest(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
   const body = lines.length ? lines.join(' · ') : 'Light day. Take it easy.';
 
   await send(sb, 'digest', now.date, {
-    title: 'Today',
+    title: 'Today\'s plan',
     body,
     url: '/',
     tag: 'digest',
@@ -231,7 +231,7 @@ async function dispatchWorkoutReminder(sb: SupabaseClient, prefs: Prefs, now: Lo
 
   await send(sb, 'workout-reminder', now.date, {
     title: `${today.name} day`,
-    body: 'You haven\'t logged a workout yet today.',
+    body: 'No session logged yet — time to lift.',
     url: '/gym',
     tag: 'workout',
   });

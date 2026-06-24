@@ -12,20 +12,20 @@ import { sendPushToAll, type PushPayload } from '@/lib/push';
  */
 const SAMPLES: Record<string, PushPayload> = {
   'digest': {
-    title: 'Today',
-    body: 'Sample: 3 habits due · Push day · $42 renews tomorrow',
+    title: 'Today\'s plan',
+    body: '3 habits due · Push day · $42 renews tomorrow',
     url: '/',
     tag: 'demo-digest',
   },
   'habit': {
     title: '5 salah',
-    body: 'Reminder — keep the promise.',
+    body: 'Keep the promise.',
     url: '/',
     tag: 'demo-habit',
   },
   'workout': {
     title: 'Push day',
-    body: 'You haven\'t logged a workout yet today.',
+    body: 'No session logged yet — time to lift.',
     url: '/gym',
     tag: 'demo-workout',
   },
@@ -49,8 +49,8 @@ const SAMPLES: Record<string, PushPayload> = {
     tag: 'demo-urge',
   },
   'goal-evening': {
-    title: 'Goals',
-    body: 'Sample: 2 goals still unchecked tonight.',
+    title: '2 goals left',
+    body: 'Couple hours left to finish today\'s list.',
     url: '/',
     tag: 'demo-goal-evening',
   },
