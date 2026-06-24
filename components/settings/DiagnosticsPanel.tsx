@@ -13,7 +13,7 @@ interface Diag {
     newest: { id: string; created_at: string; last_used_at: string | null; user_agent: string | null } | null;
   };
   prefs: Record<string, unknown>;
-  habitReminders: { name: string; reminderTime: string; scheduledToday: boolean; firedToday: boolean }[];
+  habitReminders: { name: string; slot: string; onDay: boolean; complete: boolean; fired: boolean; skipReason: string | null }[];
   recentLog: { kind: string; key: string; sent_at: string }[];
   lastLogAgeMin: number | null;
   heartbeat: { iso: string | null; ageMin: number | null };
@@ -212,11 +212,20 @@ export default function DiagnosticsPanel() {
                   <div className="diag-log empty" style={{ fontSize: 11 }}>No habits have a reminder time set yet — open a habit and pick one.</div>
                 ) : (
                   diag.habitReminders.map((h, i) => (
-                    <div key={i} className="diag-row">
-                      <span className="k">{h.name} · {h.reminderTime}</span>
-                      <span style={{ display: 'inline-flex', gap: 4 }}>
-                        <span className={`diag-pill ${h.scheduledToday ? 'on' : 'skip'}`}>{h.scheduledToday ? 'today' : 'off day'}</span>
-                        <span className={`diag-pill ${h.firedToday ? 'done' : 'pending'}`}>{h.firedToday ? 'sent' : 'pending'}</span>
+                    <div key={i} className="diag-row" style={{ alignItems: 'flex-start' }}>
+                      <span className="k">{h.name} · {h.slot}</span>
+                      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+                        <span style={{ display: 'inline-flex', gap: 4 }}>
+                          <span className={`diag-pill ${h.onDay ? 'on' : 'skip'}`}>{h.onDay ? 'today' : 'off day'}</span>
+                          <span className={`diag-pill ${h.fired ? 'done' : (h.skipReason ? 'skip' : 'pending')}`}>
+                            {h.fired ? 'sent' : (h.skipReason ? 'skipped' : 'pending')}
+                          </span>
+                        </span>
+                        {h.skipReason && !h.fired && (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#F2C063', textAlign: 'right' }}>
+                            {h.skipReason}
+                          </span>
+                        )}
                       </span>
                     </div>
                   ))

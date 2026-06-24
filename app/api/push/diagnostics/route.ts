@@ -36,7 +36,7 @@ export async function GET() {
     sb.from('push_subscriptions').select('id, created_at, last_used_at, user_agent').order('created_at', { ascending: false }),
     sb.from('notification_prefs').select('*').eq('id', 1).maybeSingle(),
     sb.from('notification_log').select('kind, key, sent_at').order('sent_at', { ascending: false }).limit(20),
-    sb.from('habits').select('id, name, reminder_time, reminder_times, schedule_type, schedule_days').is('archived_at', null),
+    sb.from('habits').select('id, name, reminder_time, reminder_times, schedule_type, schedule_days, goal_value, goal_period').is('archived_at', null),
     sb.from('cron_heartbeat').select('last_tick_at').eq('id', 1).maybeSingle(),
   ]);
 
@@ -63,27 +63,64 @@ export async function GET() {
   const dowMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   const dow = dowMap[parts.weekday] ?? 0;
 
-  // Habits with reminders — when do they next fire & did they already today?
+  // Habits with reminders — surface every configured slot with its concrete
+  // skip reason so silent dispatcher returns are debuggable from the UI.
   const log = logRes.data ?? [];
-  const habitReminders = (habitsRes.data ?? [])
-    .filter(h => h.reminder_time)
-    .map(h => {
-      const scheduledDays = (h.schedule_days as number[] | null) ?? null;
-      let scheduledToday = true;
-      if (h.schedule_type === 'specific_days_week') {
-        scheduledToday = scheduledDays?.includes(dow) ?? false;
-      }
-      // Dispatcher writes keys as `${habit.id}:${date}:${slotTime}` (per-slot).
-      // Match by prefix so a habit with any slot fired today reads as "sent".
-      const dedupPrefix = `${h.id}:${localDate}:`;
-      const firedToday = log.some(l => l.kind === 'habit-reminder' && l.key.startsWith(dedupPrefix));
-      return {
-        name: h.name,
-        reminderTime: (h.reminder_time as string).slice(0, 5),
-        scheduledToday,
-        firedToday,
-      };
-    });
+  const habitsEnabled = (prefs.habit_reminders_enabled ?? true) as boolean;
+
+  // Today's completion counts for each habit, so we can compute "already done".
+  const habitRows = habitsRes.data ?? [];
+  const compRes = habitRows.length
+    ? await sb.from('habit_completions')
+        .select('habit_id, count')
+        .in('habit_id', habitRows.map(h => h.id as string))
+        .eq('date', localDate)
+    : { data: [] as { habit_id: string; count: number }[] };
+  const doneToday = new Map<string, number>();
+  for (const c of (compRes.data ?? []) as { habit_id: string; count: number }[]) {
+    doneToday.set(c.habit_id, c.count ?? 0);
+  }
+
+  type HabitSlot = {
+    name: string;
+    slot: string;            // 'HH:MM'
+    onDay: boolean;          // matches today's schedule
+    complete: boolean;       // hit the daily goal already
+    fired: boolean;          // log row exists for this slot
+    skipReason: string | null;
+  };
+
+  const habitReminders: HabitSlot[] = [];
+  for (const h of habitRows) {
+    const times = ((h.reminder_times as string[] | null) ?? []).filter(Boolean);
+    if (times.length === 0 && h.reminder_time) times.push(h.reminder_time as string);
+    if (times.length === 0) continue;
+
+    let onDay = true;
+    if (h.schedule_type === 'specific_days_week') {
+      onDay = ((h.schedule_days as number[] | null) ?? []).includes(dow);
+    }
+    const goal = (h.goal_value as number) ?? 1;
+    const done = doneToday.get(h.id as string) ?? 0;
+    const complete = done >= goal;
+
+    for (const t of times) {
+      const slot = t.slice(0, 5);
+      const fired = log.some(l => l.kind === 'habit-reminder' && l.key === `${h.id}:${localDate}:${slot}`);
+      let skipReason: string | null = null;
+      if (!habitsEnabled) skipReason = 'habit_reminders_enabled = off';
+      else if (!onDay) skipReason = 'off-day';
+      else if (complete) skipReason = `already complete (${done}/${goal})`;
+      habitReminders.push({
+        name: h.name as string,
+        slot,
+        onDay,
+        complete,
+        fired,
+        skipReason,
+      });
+    }
+  }
 
   // Best-guess "is the cron alive" — any log row in the last 30 minutes implies
   // the dispatcher ran at least once. If it's been hours, cron is probably down.
