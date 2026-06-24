@@ -16,11 +16,11 @@ import { supabaseServer } from '@/lib/supabase';
  * each scheduled time gets exactly one shot per day.
  */
 
-// Tightened from ±5 to ±1 once cron moved from GitHub Actions (5-min
-// cadence, frequently delayed) to Cloudflare Cron Triggers (every minute,
-// reliable). A user-set time of 17:27 now fires from the 17:27 tick
-// rather than potentially the 17:25 or 17:30 tick.
-const WINDOW_MIN = 1;
+// Window of [target, target + WINDOW_MIN) minutes — see within() below.
+// Set to 2 so the target minute is the normal fire moment, plus one
+// minute of slack if a single cron tick is dropped. With Cloudflare Cron
+// Triggers running every minute, 99%+ of slots fire on their exact minute.
+const WINDOW_MIN = 2;
 const MILESTONES = [7, 14, 30, 60, 90, 180, 365];
 
 interface Prefs {
@@ -70,11 +70,18 @@ function timeToMinutes(t: string): number {
   return h * 60 + (m || 0);
 }
 
-/** True when `now` is within ±WINDOW_MIN of `target` (handles midnight wrap). */
+/**
+ * True when `now` is at or just after `target` — fires only on/after the
+ * user's set minute, never before. Symmetric matching would let the 17:55
+ * tick fire a 17:56 slot, which feels broken ("got it a minute early").
+ * Window is [target, target + WINDOW_MIN) minutes; the dedup key prevents
+ * the next tick(s) inside the window from re-sending.
+ */
 function within(nowMin: number, targetMin: number): boolean {
-  let diff = Math.abs(nowMin - targetMin);
-  if (diff > 720) diff = 1440 - diff; // closest distance around the clock
-  return diff <= WINDOW_MIN;
+  let diff = nowMin - targetMin;
+  if (diff < -720) diff += 1440;       // wraps past midnight
+  if (diff > 720) diff -= 1440;
+  return diff >= 0 && diff < WINDOW_MIN;
 }
 
 function inQuietHours(prefs: Prefs, nowMin: number): boolean {
