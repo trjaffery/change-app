@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, GripVertical } from 'lucide-react';
 import { getActiveDateString, toDateString, formatDate } from '@/lib/dates';
 import BottomSheet from '@/components/layout/BottomSheet';
 import { useToast } from '@/components/layout/Toast';
@@ -343,7 +343,13 @@ export default function HabitList({
     if (!rowEl) return;
     const baseOffset = revealedId === habitId ? -ACTION_WIDTH : 0;
     const pointerId = e.pointerId;
-    const longPressTimer = setTimeout(() => enterReorderMode(habitId, pointerId), 320);
+    // Touch on the drag handle → skip the long-press wait and enter reorder mode
+    // immediately. The handle's `touch-action: none` keeps the browser from
+    // stealing the gesture for page scroll.
+    const fromHandle = !!(e.target as HTMLElement).closest('[data-drag-handle]');
+    const longPressTimer = fromHandle
+      ? null
+      : setTimeout(() => enterReorderMode(habitId, pointerId), 320);
     gestureRef.current = {
       id: habitId,
       startX: e.clientX, startY: e.clientY,
@@ -353,6 +359,7 @@ export default function HabitList({
       initialIdx: idx,
       rowHeight: rowEl.getBoundingClientRect().height,
     };
+    if (fromHandle) enterReorderMode(habitId, pointerId);
   }
 
   function onRowPointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -463,6 +470,12 @@ export default function HabitList({
         .habit-row.done { background-color: rgba(28,28,30,1); border-color: rgba(255,255,255,0.09); }
         .habit-row.reordering { z-index: 20; box-shadow: 0 14px 28px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08); cursor: grabbing; touch-action: none; }
         .habit-drop-indicator { height: 0; border-top: 2px solid var(--success); margin: 3px 6px; border-radius: 1px; pointer-events: none; box-shadow: 0 0 10px rgba(107,227,164,0.4); animation: drop-pulse 1.2s ease-in-out infinite; }
+        /* Drag handle — touch-action: none so iOS doesn't steal the gesture
+           for page scroll before our pointermove fires. Tap target is at least
+           28px wide for finger-friendliness. */
+        .habit-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 36px; margin-right: -6px; color: var(--text-tertiary); cursor: grab; flex-shrink: 0; touch-action: none; -webkit-tap-highlight-color: transparent; opacity: 0.55; transition: opacity 160ms ease, color 160ms ease; }
+        .habit-drag-handle:hover { opacity: 1; color: var(--text-secondary); }
+        .habit-drag-handle:active { cursor: grabbing; opacity: 1; }
         @keyframes drop-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
         .habit-actions { position: absolute; top: 0; bottom: 0; right: 0; width: ${ACTION_WIDTH}px; display: flex; align-items: stretch; gap: 4px; padding: 4px 4px 4px 0; z-index: 1; }
         .habit-action-btn { flex: 1; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; -webkit-tap-highlight-color: transparent; transition: filter 160ms ease; gap: 4px; flex-direction: column; }
@@ -886,6 +899,15 @@ export default function HabitList({
                   {!isGoalOne && (
                     <button data-no-swipe className="count-btn" onClick={() => increment(habit)} style={{ borderColor: habit.is_complete ? habit.color : undefined }}>+</button>
                   )}
+
+                  <span
+                    data-drag-handle
+                    className="habit-drag-handle"
+                    aria-label="Reorder habit"
+                    title="Drag to reorder"
+                  >
+                    <GripVertical size={18} strokeWidth={1.75} />
+                  </span>
                 </div>
               </div>
               </Fragment>
