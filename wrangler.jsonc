@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"main": ".open-next/worker.js",
+	"main": "worker-entry.js",
 	"name": "change-app",
 	"compatibility_date": "2026-05-19",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -9,5 +9,11 @@
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
+	},
+	// Drives the notification dispatcher every 5 minutes. Cloudflare cron
+	// is reliable to the minute, unlike GitHub Actions free-tier schedule
+	// which drops most ticks under load.
+	"triggers": {
+		"crons": ["*/5 * * * *"]
 	}
 }
