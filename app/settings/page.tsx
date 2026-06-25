@@ -4,6 +4,7 @@ import { Bell, BellOff, Check, Share, Plus, Smartphone } from 'lucide-react';
 import { useToast } from '@/components/layout/Toast';
 import NotificationPrefsCard from '@/components/settings/NotificationPrefsCard';
 import DiagnosticsPanel from '@/components/settings/DiagnosticsPanel';
+import HealthImportCard from '@/components/settings/HealthImportCard';
 
 type State = 'unsupported' | 'needs-install' | 'denied' | 'idle' | 'subscribed';
 
@@ -253,6 +254,7 @@ export default function SettingsPage() {
       </div>
 
       {state === 'subscribed' && <NotificationPrefsCard />}
+      <HealthImportCard />
       {state === 'subscribed' && <DiagnosticsPanel />}
     </>
   );

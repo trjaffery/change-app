@@ -5,7 +5,11 @@ const COOKIE = 'app_token';
 // /api/cron has its own bearer-auth via CRON_SECRET — letting it through the
 // cookie gate is the only way GitHub Actions can call it without holding our
 // session cookie. The route handler itself rejects anything without the secret.
-const PUBLIC_PATHS = ['/login', '/api/auth', '/api/cron'];
+// /api/health-import/webhook is the same shape: an iOS Shortcut posts to it
+// with a HEALTH_IMPORT_SECRET bearer token. Note this exempts the /webhook
+// child path only — startsWith on the bare /api/health-import would also
+// expose the /config and data-read endpoints which need cookie auth.
+const PUBLIC_PATHS = ['/login', '/api/auth', '/api/cron', '/api/health-import/webhook'];
 
 export default function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
