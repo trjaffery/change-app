@@ -1,11 +1,14 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, Moon } from 'lucide-react';
+import { Activity, Moon, RefreshCw } from 'lucide-react';
 import { getActiveDateString } from '@/lib/dates';
 
 interface Row { date: string; steps: number | null; sleep_minutes: number | null }
 
 const WINDOW_DAYS = 7;
+// Name of the iOS Shortcut to run when the Sync button is tapped. Must match
+// what the user named it on their device — iOS looks shortcuts up by name.
+const SYNC_SHORTCUT_NAME = 'Steps to Change';
 
 export default function HealthMetricsCard() {
   const today = getActiveDateString();
@@ -24,6 +27,16 @@ export default function HealthMetricsCard() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // Re-fetch when the tab regains focus — covers the "tap Sync, iOS opens
+  // Shortcuts, Shortcut posts to webhook, user swipes back to the PWA" flow.
+  useEffect(() => {
+    function onVis() { if (document.visibilityState === 'visible') load(); }
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [load]);
+
+  const syncHref = `shortcuts://run-shortcut?name=${encodeURIComponent(SYNC_SHORTCUT_NAME)}`;
+
   if (loading) {
     return (
       <div className="card" style={{ marginBottom: 22, minHeight: 140 }}>
@@ -36,7 +49,7 @@ export default function HealthMetricsCard() {
   if (rows.length === 0) {
     return (
       <div className="card" style={{ marginBottom: 22 }}>
-        <div className="section-title">Health</div>
+        <CardHeader syncHref={syncHref} />
         <div className="empty-state" style={{ textAlign: 'left', fontSize: 12 }}>
           No data yet. Set up the iOS Shortcut in Settings → Health import to start syncing steps and sleep from your iPhone.
         </div>
@@ -58,7 +71,7 @@ export default function HealthMetricsCard() {
 
   return (
     <div className="card" style={{ marginBottom: 22 }}>
-      <div className="section-title">Health</div>
+      <CardHeader syncHref={syncHref} />
 
       <MetricRow
         icon={<Activity size={14} strokeWidth={1.75} />}
@@ -79,6 +92,28 @@ export default function HealthMetricsCard() {
         series={sleepSeries}
         color="#9F84FF"
       />
+    </div>
+  );
+}
+
+function CardHeader({ syncHref }: { syncHref: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+      <div className="section-title" style={{ margin: 0 }}>Health</div>
+      <a
+        href={syncHref}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '6px 10px', borderRadius: 8,
+          background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+          color: 'var(--text-secondary)', textDecoration: 'none',
+          fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+        aria-label="Sync from Health"
+      >
+        <RefreshCw size={11} strokeWidth={1.75} /> Sync
+      </a>
     </div>
   );
 }
