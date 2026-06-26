@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, Moon, RefreshCw } from 'lucide-react';
-import { getActiveDateString } from '@/lib/dates';
+import { toDateString } from '@/lib/dates';
 
 interface Row { date: string; steps: number | null; sleep_minutes: number | null }
 
@@ -11,7 +11,10 @@ const WINDOW_DAYS = 7;
 const SYNC_SHORTCUT_NAME = 'Steps to Change';
 
 export default function HealthMetricsCard() {
-  const today = getActiveDateString();
+  // Plain calendar today — matches Apple Health's tile and the date the iOS
+  // Shortcut posts under. The 6 AM boundary (getActiveDateString) would
+  // mis-attribute Health rows when synced between midnight and 6 AM.
+  const today = toDateString(new Date());
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
 
