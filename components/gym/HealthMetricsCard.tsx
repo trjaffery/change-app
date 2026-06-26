@@ -9,8 +9,8 @@ const WINDOW_DAYS = 7;
 // iOS looks shortcuts up by their exact name. These match the user's
 // device — the default "Get Contents of URL" name iOS auto-assigns when a
 // Shortcut isn't manually renamed.
-const STEPS_SHORTCUT_NAME = 'Get Contents of URL';
-const SLEEP_SHORTCUT_NAME = 'Get Contents of URL 1';
+const STEPS_SHORTCUT_NAME = 'StepSync';
+const SLEEP_SHORTCUT_NAME = 'SleepSync';
 
 export default function HealthMetricsCard() {
   // Plain calendar today — matches Apple Health's tile and the date the iOS
