@@ -77,7 +77,7 @@ export default function HealthMetricsCard() {
 
   return (
     <div className="card" style={{ marginBottom: 22 }}>
-      <CardHeader syncHref={syncHref} />
+      <CardHeader syncStepsHref={syncStepsHref} syncSleepHref={syncSleepHref} />
 
       <MetricRow
         icon={<Activity size={14} strokeWidth={1.75} />}
