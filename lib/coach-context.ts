@@ -19,7 +19,7 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
   const [
     habitsRes, todayCompRes, weekCompRes,
     splitsRes, settingsRes, urgesRes, recentUrgeNotesRes,
-    goalsTodayRes, goalsWeekRes,
+    tasksTodayRes, tasksWeekRes,
     sessionsRes, relapsesRes, nwHistoryRes,
     diaryWeekRes,
   ] = await Promise.all([
@@ -30,8 +30,8 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     sb.from('recovery_settings').select('key, value'),
     sb.from('recovery_urges').select('intensity, note, tags, created_at').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
     sb.from('recovery_urges').select('intensity, note, created_at').order('created_at', { ascending: false }).limit(5),
-    sb.from('goals').select('text, done').eq('date', todayStr),
-    sb.from('goals').select('date, text, done').gte('date', sevenAgo).lte('date', todayStr),
+    sb.from('tasks').select('text, done').eq('due_date', todayStr),
+    sb.from('tasks').select('due_date, text, done').gte('due_date', sevenAgo).lte('due_date', todayStr),
     sb.from('gym_sessions').select('date, duration_seconds, rpe, split_days(name)').gte('date', sevenAgo).lte('date', todayStr),
     sb.from('recovery_relapses').select('created_at, note').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
     sb.from('finance_nw_history').select('total, snapshot_date').gte('snapshot_date', sevenAgo).lte('snapshot_date', todayStr).order('snapshot_date'),
@@ -129,17 +129,17 @@ export async function buildCoachContext(sb: SupabaseClient): Promise<string> {
     return `  - ${d}${r.note ? ` — "${r.note}"` : ''}`;
   });
 
-  // Goals.
-  const todayGoals = goalsTodayRes.data ?? [];
-  const goalsTodayLines = todayGoals.length === 0
-    ? '  (no goals set for today)'
-    : todayGoals.map(g => `  - [${g.done ? '✓' : ' '}] ${g.text}`).join('\n');
-  const weekGoals = goalsWeekRes.data ?? [];
-  const goalsSetDays = new Set(weekGoals.map(g => g.date as string)).size;
-  const goalsDone = weekGoals.filter(g => g.done).length;
-  const goalsWeekLine = weekGoals.length === 0
-    ? 'No daily goals set in the last 7 days.'
-    : `Last 7 days: goals set on ${goalsSetDays}/7 days, ${goalsDone}/${weekGoals.length} completed.`;
+  // Tasks.
+  const todayTasks = (tasksTodayRes.data ?? []) as Array<{ text: string; done: boolean }>;
+  const goalsTodayLines = todayTasks.length === 0
+    ? '  (no tasks scheduled for today)'
+    : todayTasks.map(t => `  - [${t.done ? '✓' : ' '}] ${t.text}`).join('\n');
+  const weekTasks = (tasksWeekRes.data ?? []) as Array<{ due_date: string | null; text: string; done: boolean }>;
+  const taskSetDays = new Set(weekTasks.map(t => t.due_date).filter((d): d is string => !!d)).size;
+  const tasksDone = weekTasks.filter(t => t.done).length;
+  const goalsWeekLine = weekTasks.length === 0
+    ? 'No tasks scheduled in the last 7 days.'
+    : `Last 7 days: tasks scheduled on ${taskSetDays}/7 days, ${tasksDone}/${weekTasks.length} completed.`;
 
   // Gym 7-day rollup.
   const sessions = sessionsRes.data ?? [];

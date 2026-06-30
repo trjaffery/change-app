@@ -36,13 +36,13 @@ export async function POST() {
 
     const sevenAgoIso = new Date(Date.now() - 7 * 86400000).toISOString();
 
-    const [habitsRes, todayCompRes, splitsRes, settingsRes, urgesRes, goalsRes, relapsesRes] = await Promise.all([
+    const [habitsRes, todayCompRes, splitsRes, settingsRes, urgesRes, tasksRes, relapsesRes] = await Promise.all([
       sb.from('habits').select('id, name, goal_value, schedule_type, schedule_days').is('archived_at', null),
       sb.from('habit_completions').select('habit_id, count').eq('date', today),
       sb.from('splits').select('name, split_days(name, day_of_week, split_exercises(exercise))').eq('is_active', true).limit(1),
       sb.from('recovery_settings').select('key, value'),
       sb.from('recovery_urges').select('intensity, created_at').order('created_at', { ascending: false }),
-      sb.from('goals').select('text, done').eq('date', today),
+      sb.from('tasks').select('text, done').eq('due_date', today),
       sb.from('recovery_relapses').select('created_at').gte('created_at', sevenAgoIso).order('created_at', { ascending: false }),
     ]);
 
@@ -80,9 +80,9 @@ export async function POST() {
     const lastRelapse = relapsesRes.data?.[0];
     const daysSinceRelapse = lastRelapse ? Math.floor((Date.now() - new Date(lastRelapse.created_at).getTime()) / 86400000) : null;
 
-    // ── Goals ───────────────────────────────────────────────────────────
-    const goals = goalsRes.data ?? [];
-    const pendingGoals = goals.filter(g => !g.done).length;
+    // ── Tasks ───────────────────────────────────────────────────────────
+    const tasks = tasksRes.data ?? [];
+    const pendingTasks = tasks.filter(t => !t.done).length;
 
     // ── Skip-vs-speak decision ─────────────────────────────────────────
     // We need at least ONE actionable signal to bother speaking.
@@ -114,7 +114,7 @@ export async function POST() {
       ctx.push(`Recovery streak: day ${streakDays}.`);
     }
     if (todayHabits.length) ctx.push(`${habitsDoneToday}/${todayHabits.length} habits done so far today.`);
-    if (pendingGoals) ctx.push(`${pendingGoals} pending goal${pendingGoals === 1 ? '' : 's'} on today's list.`);
+    if (pendingTasks) ctx.push(`${pendingTasks} pending task${pendingTasks === 1 ? '' : 's'} on today's list.`);
 
     const prompt = ctx.join('\n') + `
 

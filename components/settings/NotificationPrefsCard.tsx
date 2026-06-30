@@ -142,7 +142,7 @@ export default function NotificationPrefsCard() {
         </div>
       )}
 
-      <Row title="Evening goal check-in" desc="If any of today's goals are still unchecked">
+      <Row title="Evening task check-in" desc="If any of today's tasks are still unchecked">
         <Toggle on={prefs.goal_evening_enabled} onChange={v => save({ goal_evening_enabled: v })} />
       </Row>
       {prefs.goal_evening_enabled && (

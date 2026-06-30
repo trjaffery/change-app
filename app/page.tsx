@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import DailyBriefing from '@/components/dashboard/DailyBriefing';
 import CompletionRing from '@/components/dashboard/CompletionRing';
-import GoalTicker from '@/components/dashboard/GoalTicker';
-import DailyGoals from '@/components/dashboard/DailyGoals';
+import TaskTicker from '@/components/dashboard/TaskTicker';
+import DailyTasks from '@/components/dashboard/DailyTasks';
 import DiaryCard from '@/components/dashboard/DiaryCard';
 import HabitList from '@/components/habits/HabitList';
 import HabitCalendar from '@/components/habits/HabitCalendar';
@@ -20,9 +20,9 @@ export default function DashboardPage() {
     <>
       <h1 className="page-title">Change</h1>
       <DailyBriefing />
-      <GoalTicker />
+      <TaskTicker />
       <CompletionRing done={done} total={total} />
-      <DailyGoals />
+      <DailyTasks />
       <DiaryCard />
       <HabitList
         onCompletionChange={(d, t) => { setDone(d); setTotal(t); }}

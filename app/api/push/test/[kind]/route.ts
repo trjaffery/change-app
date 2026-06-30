@@ -8,7 +8,7 @@ import { sendPushToAll, type PushPayload } from '@/lib/push';
  * generic "Test push".
  *
  * Usage: POST /api/push/test/<kind>  where kind is one of:
- *   digest | habit | workout | sub-renewal | milestone | urge | goal-evening
+ *   digest | habit | workout | sub-renewal | milestone | urge | task-evening
  */
 const SAMPLES: Record<string, PushPayload> = {
   'digest': {
@@ -48,11 +48,11 @@ const SAMPLES: Record<string, PushPayload> = {
     url: '/recovery',
     tag: 'demo-urge',
   },
-  'goal-evening': {
-    title: '2 goals left',
+  'task-evening': {
+    title: '2 tasks left',
     body: 'Couple hours left to finish today\'s list.',
     url: '/',
-    tag: 'demo-goal-evening',
+    tag: 'demo-task-evening',
   },
 };
 

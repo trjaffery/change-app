@@ -179,11 +179,11 @@ async function dispatchDigest(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
   if (!prefs.digest_enabled) return;
   if (!within(now.minutes, timeToMinutes(prefs.digest_time))) return;
 
-  const [habitsRes, splitsRes, subsRes, goalsRes] = await Promise.all([
+  const [habitsRes, splitsRes, subsRes, tasksRes] = await Promise.all([
     sb.from('habits').select('id, schedule_type, schedule_days, goal_value, goal_period').is('archived_at', null),
     sb.from('splits').select('split_days(name, day_of_week)').eq('is_active', true).limit(1),
     sb.from('finance_subscriptions').select('name, amount, next_renewal'),
-    sb.from('goals').select('done').eq('date', now.date),
+    sb.from('tasks').select('done').eq('due_date', now.date),
   ]);
 
   const habits = (habitsRes.data ?? []).filter(h => {
@@ -202,14 +202,14 @@ async function dispatchDigest(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
   const tomorrow = new Date(todayDate.getTime() + 86400000).toISOString().split('T')[0];
   const renewingTomorrow = (subsRes.data ?? []).filter(s => s.next_renewal === tomorrow);
 
-  // Goals for today (entered the previous evening or set just now). The digest
-  // mentions any unfinished count so the morning summary feels complete.
-  const goals = goalsRes.data ?? [];
-  const pendingGoals = goals.filter(g => !g.done).length;
+  // Tasks for today (entered the previous evening or set just now). The
+  // digest mentions any unfinished count so the morning summary feels complete.
+  const todayTasks = tasksRes.data ?? [];
+  const pendingTasks = todayTasks.filter(t => !t.done).length;
 
   const lines: string[] = [];
   if (habits.length) lines.push(`${habits.length} habit${habits.length === 1 ? '' : 's'} due`);
-  if (pendingGoals) lines.push(`${pendingGoals} goal${pendingGoals === 1 ? '' : 's'}`);
+  if (pendingTasks) lines.push(`${pendingTasks} task${pendingTasks === 1 ? '' : 's'}`);
   if (todaySplit) lines.push(`${todaySplit.name}`);
   if (renewingTomorrow.length) {
     const total = renewingTomorrow.reduce((s, x) => s + Number(x.amount), 0);
@@ -297,21 +297,29 @@ async function dispatchMilestones(sb: SupabaseClient, prefs: Prefs, now: LocalNo
   });
 }
 
-async function dispatchGoalEvening(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
+async function dispatchTaskEvening(sb: SupabaseClient, prefs: Prefs, now: LocalNow) {
+  // Pref columns are still named goal_evening_* in the DB — keeping the
+  // schema stable was cheaper than a rename migration. Internally this is
+  // "task evening" since /goals → /tasks.
   if (!prefs.goal_evening_enabled) return;
   if (!within(now.minutes, timeToMinutes(prefs.goal_evening_time))) return;
 
-  const { data: goals } = await sb.from('goals').select('done').eq('date', now.date);
-  const all = goals ?? [];
-  if (all.length === 0) return;             // no goals set today — silent
-  const pending = all.filter(g => !g.done).length;
+  // Pull anything scheduled for today; ignore recurring tasks (they don't
+  // need an end-of-day nag — they reset on their own).
+  const { data: tasks } = await sb.from('tasks')
+    .select('done')
+    .eq('due_date', now.date)
+    .is('recurrence', null);
+  const all = tasks ?? [];
+  if (all.length === 0) return;             // no tasks set today — silent
+  const pending = all.filter(t => !t.done).length;
   if (pending === 0) return;                // all checked off — nothing to nag about
 
-  await send(sb, 'goal-evening', now.date, {
-    title: pending === 1 ? '1 goal left' : `${pending} goals left`,
+  await send(sb, 'task-evening', now.date, {
+    title: pending === 1 ? '1 task left' : `${pending} tasks left`,
     body: 'Couple hours left to finish today\'s list.',
     url: '/',
-    tag: 'goal-evening',
+    tag: 'task-evening',
   });
 }
 
@@ -378,7 +386,7 @@ export async function runNotificationTick(): Promise<{ ok: true; tz: string; loc
     dispatchWorkoutReminder(sb, merged, now),
     dispatchSubscriptionWarnings(sb, merged, now),
     dispatchMilestones(sb, merged, now),
-    dispatchGoalEvening(sb, merged, now),
+    dispatchTaskEvening(sb, merged, now),
     dispatchUrgeCheckins(sb, merged, now),
   ]);
 

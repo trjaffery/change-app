@@ -20,9 +20,9 @@ interface WindowStats {
   avg_intensity: number | null;
   relapses: number;
   habit_hit_rate: number | null; // 0..1, hit_days / scheduled_days across all habits
-  goals_set_days: number;
-  goals_done: number;
-  goals_total: number;
+  tasks_set_days: number;
+  tasks_done: number;
+  tasks_total: number;
 }
 
 async function fetchWindowStats(sb: ReturnType<typeof supabaseServer>, weekStart: string): Promise<WindowStats> {
@@ -33,13 +33,13 @@ async function fetchWindowStats(sb: ReturnType<typeof supabaseServer>, weekStart
   const startIso = start.toISOString();
   const endIso = end.toISOString();
 
-  const [habitsRes, compsRes, sessionsRes, urgesRes, relapsesRes, goalsRes] = await Promise.all([
+  const [habitsRes, compsRes, sessionsRes, urgesRes, relapsesRes, tasksRes] = await Promise.all([
     sb.from('habits').select('id, goal_value, schedule_type, schedule_days, schedule_count, created_at').is('archived_at', null),
     sb.from('habit_completions').select('habit_id, date, count').gte('date', startStr).lte('date', endStr),
     sb.from('gym_sessions').select('date, duration_seconds').gte('date', startStr).lte('date', endStr),
     sb.from('recovery_urges').select('intensity').gte('created_at', startIso).lte('created_at', endIso),
     sb.from('recovery_relapses').select('created_at').gte('created_at', startIso).lte('created_at', endIso),
-    sb.from('goals').select('date, done').gte('date', startStr).lte('date', endStr),
+    sb.from('tasks').select('due_date, done').gte('due_date', startStr).lte('due_date', endStr),
   ]);
 
   const habits = habitsRes.data ?? [];
@@ -69,9 +69,9 @@ async function fetchWindowStats(sb: ReturnType<typeof supabaseServer>, weekStart
   const sessions = sessionsRes.data ?? [];
   const urges = urgesRes.data ?? [];
   const relapses = relapsesRes.data ?? [];
-  const goals = goalsRes.data ?? [];
+  const tasks = (tasksRes.data ?? []) as Array<{ due_date: string | null; done: boolean }>;
 
-  const goalDates = new Set(goals.map(g => g.date));
+  const taskDates = new Set(tasks.map(t => t.due_date).filter((d): d is string => !!d));
   return {
     workouts: sessions.length,
     workout_minutes: Math.round(sessions.reduce((s, x) => s + (x.duration_seconds ?? 0), 0) / 60),
@@ -79,9 +79,9 @@ async function fetchWindowStats(sb: ReturnType<typeof supabaseServer>, weekStart
     avg_intensity: urges.length ? urges.reduce((s, u) => s + u.intensity, 0) / urges.length : null,
     relapses: relapses.length,
     habit_hit_rate: scheduledTotal > 0 ? hitTotal / scheduledTotal : null,
-    goals_set_days: goalDates.size,
-    goals_done: goals.filter(g => g.done).length,
-    goals_total: goals.length,
+    tasks_set_days: taskDates.size,
+    tasks_done: tasks.filter(t => t.done).length,
+    tasks_total: tasks.length,
   };
 }
 
@@ -129,14 +129,14 @@ THIS WEEK (${weekStart}):
 - Workouts: ${thisWeek.workouts} (${thisWeek.workout_minutes} min total)
 - Urges: ${thisWeek.urges}${thisWeek.avg_intensity !== null ? ` (avg ${fmt(thisWeek.avg_intensity)}/5)` : ''}
 - Relapses: ${thisWeek.relapses}
-- Goals: set on ${thisWeek.goals_set_days}/7 days, ${thisWeek.goals_done}/${thisWeek.goals_total} done
+- Tasks: scheduled on ${thisWeek.tasks_set_days}/7 days, ${thisWeek.tasks_done}/${thisWeek.tasks_total} done
 
 PRIOR WEEK (${priorWeekStart}):
 - Habits: hit rate ${pct(priorWeek.habit_hit_rate)}
 - Workouts: ${priorWeek.workouts} (${priorWeek.workout_minutes} min total)
 - Urges: ${priorWeek.urges}${priorWeek.avg_intensity !== null ? ` (avg ${fmt(priorWeek.avg_intensity)}/5)` : ''}
 - Relapses: ${priorWeek.relapses}
-- Goals: set on ${priorWeek.goals_set_days}/7 days, ${priorWeek.goals_done}/${priorWeek.goals_total} done
+- Tasks: scheduled on ${priorWeek.tasks_set_days}/7 days, ${priorWeek.tasks_done}/${priorWeek.tasks_total} done
 
 Return JSON exactly:
 {"summary":"1–2 sentence summary that names the BIGGEST change this week vs prior. Cite numbers.","wins":["≤3 specific wins"],"improvements":["≤3 specific improvements"],"plan":["EXACTLY ONE prescriptive action item for next week — the single most important next move"]}

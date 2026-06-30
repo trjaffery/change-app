@@ -142,14 +142,14 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
   const startStr = utcDate(new Date(now - (windowDays - 1) * 86400000));
   const startIso = new Date(now - (windowDays - 1) * 86400000).toISOString();
 
-  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, relapsesRes, goalsRes, diaryRes] = await Promise.all([
+  const [habitsRes, completionsRes, sessionsRes, setsRes, urgesRes, relapsesRes, tasksRes, diaryRes] = await Promise.all([
     sb.from('habits').select('id, name, schedule_type, schedule_days, goal_value, goal_period').is('archived_at', null),
     sb.from('habit_completions').select('habit_id, date, count').gte('date', startStr),
     sb.from('gym_sessions').select('date').gte('date', startStr),
     sb.from('gym_sets').select('date, reps, weight').gte('date', startStr),
     sb.from('recovery_urges').select('intensity, created_at').gte('created_at', startIso),
     sb.from('recovery_relapses').select('created_at').gte('created_at', startIso),
-    sb.from('goals').select('date, done').gte('date', startStr),
+    sb.from('tasks').select('due_date, done').gte('due_date', startStr),
     sb.from('diary_entries').select('date, mood').gte('date', startStr).not('mood', 'is', null),
   ]);
 
@@ -231,11 +231,12 @@ export async function computeCorrelations(sb: SupabaseClient, windowDays = 30): 
     if (r) r.relapsed = true;
   }
 
-  for (const g of (goalsRes.data ?? [])) {
-    const r = records.get(g.date);
+  for (const t of (tasksRes.data ?? []) as Array<{ due_date: string | null; done: boolean }>) {
+    if (!t.due_date) continue;
+    const r = records.get(t.due_date);
     if (!r) continue;
     r.goalsTotal += 1;
-    if (g.done) r.goalsDone += 1;
+    if (t.done) r.goalsDone += 1;
   }
 
   for (const d of (diaryRes.data ?? []) as { date: string; mood: number | null }[]) {

@@ -26,7 +26,7 @@ const TEST_KINDS: { kind: string; label: string }[] = [
   { kind: 'sub-renewal',  label: 'Subscription' },
   { kind: 'milestone',    label: 'Milestone' },
   { kind: 'urge',         label: 'Urge check-in' },
-  { kind: 'goal-evening', label: 'Goal evening' },
+  { kind: 'task-evening', label: 'Task evening' },
 ];
 
 function timeAgo(iso: string): string {
