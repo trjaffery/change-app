@@ -1,17 +1,17 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, BellOff, Check, Share, Plus, Smartphone } from 'lucide-react';
+import { Bell, BellOff, Check, Share, Plus, Smartphone, Activity, Stethoscope, SlidersHorizontal } from 'lucide-react';
 import { useToast } from '@/components/layout/Toast';
 import NotificationPrefsCard from '@/components/settings/NotificationPrefsCard';
 import DiagnosticsPanel from '@/components/settings/DiagnosticsPanel';
 import HealthImportCard from '@/components/settings/HealthImportCard';
 import PageHeader from '@/components/layout/PageHeader';
+import ListRow from '@/components/layout/ListRow';
+import BottomSheet from '@/components/layout/BottomSheet';
 
 type State = 'unsupported' | 'needs-install' | 'denied' | 'idle' | 'subscribed';
+type SheetKind = null | 'push' | 'prefs' | 'diagnostics' | 'health';
 
-// Convert a URL-safe base64 string into the Uint8Array PushManager wants.
-// Returns a fresh ArrayBuffer-backed Uint8Array so it matches `BufferSource`
-// (strict TS 5.7+ rejects the ambient `Uint8Array<ArrayBufferLike>` shape).
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
   const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -25,10 +25,8 @@ function isIos(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
-
 function isStandalone(): boolean {
   if (typeof window === 'undefined') return false;
-  // iOS exposes navigator.standalone; everyone else uses display-mode media query.
   const navStandalone = (navigator as Navigator & { standalone?: boolean }).standalone;
   if (navStandalone) return true;
   return window.matchMedia?.('(display-mode: standalone)').matches ?? false;
@@ -39,40 +37,22 @@ export default function SettingsPage() {
   const [state, setState] = useState<State>('idle');
   const [endpoint, setEndpoint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sheet, setSheet] = useState<SheetKind>(null);
 
-  // Detect environment + existing subscription on mount and whenever
-  // visibility changes (user may have just installed/uninstalled).
   const refresh = useCallback(async () => {
     if (typeof window === 'undefined') return;
-
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
       setState('unsupported');
       return;
     }
-    // On iOS, Web Push only works inside the installed PWA. In Safari proper
-    // the APIs exist but the subscribe call will fail with a confusing error,
-    // so we surface "install first" up-front.
-    if (isIos() && !isStandalone()) {
-      setState('needs-install');
-      return;
-    }
-    if (Notification.permission === 'denied') {
-      setState('denied');
-      return;
-    }
-
+    if (isIos() && !isStandalone()) { setState('needs-install'); return; }
+    if (Notification.permission === 'denied') { setState('denied'); return; }
     try {
       const reg = await navigator.serviceWorker.ready;
       const existing = await reg.pushManager.getSubscription();
-      if (existing) {
-        setEndpoint(existing.endpoint);
-        setState('subscribed');
-      } else {
-        setState('idle');
-      }
-    } catch {
-      setState('idle');
-    }
+      if (existing) { setEndpoint(existing.endpoint); setState('subscribed'); }
+      else setState('idle');
+    } catch { setState('idle'); }
   }, []);
 
   useEffect(() => {
@@ -86,42 +66,27 @@ export default function SettingsPage() {
     setBusy(true);
     try {
       const perm = await Notification.requestPermission();
-      if (perm !== 'granted') {
-        if (perm === 'denied') setState('denied');
-        return;
-      }
+      if (perm !== 'granted') { if (perm === 'denied') setState('denied'); return; }
       const reg = await navigator.serviceWorker.ready;
-
-      // Pull the VAPID public key from the server so we don't bake it into the bundle.
       const vapidRes = await fetch('/api/push/vapid');
       const vapid = await vapidRes.json() as { publicKey?: string; error?: string };
       if (!vapid.publicKey) throw new Error(vapid.error ?? 'VAPID key unavailable');
-
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapid.publicKey),
       });
-
       const json = sub.toJSON();
       const res = await fetch('/api/push/subscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: sub.endpoint,
-          keys: json.keys,
-          label: navigator.userAgent.slice(0, 80),
-        }),
+        body: JSON.stringify({ endpoint: sub.endpoint, keys: json.keys, label: navigator.userAgent.slice(0, 80) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       setEndpoint(sub.endpoint);
       setState('subscribed');
       toast({ kind: 'success', message: 'Notifications enabled' });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Subscribe failed';
-      toast({ kind: 'error', message: msg });
-    } finally {
-      setBusy(false);
-    }
+      toast({ kind: 'error', message: e instanceof Error ? e.message : 'Subscribe failed' });
+    } finally { setBusy(false); }
   }
 
   async function unsubscribe() {
@@ -138,12 +103,11 @@ export default function SettingsPage() {
       }
       setEndpoint(null);
       setState('idle');
+      setSheet(null);
       toast({ kind: 'success', message: 'Notifications disabled' });
     } catch (e) {
       toast({ kind: 'error', message: e instanceof Error ? e.message : 'Unsubscribe failed' });
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   async function sendTest() {
@@ -160,103 +124,150 @@ export default function SettingsPage() {
       else toast({ kind: 'error', message: 'Push service rejected the test' });
     } catch (e) {
       toast({ kind: 'error', message: e instanceof Error ? e.message : 'Test failed' });
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
+
+  const pushStatusLabel = ({
+    unsupported: 'Not supported',
+    'needs-install': 'Install first',
+    denied: 'Denied',
+    idle: 'Off',
+    subscribed: 'On',
+  } as const)[state];
+  const pushStatusTone =
+    state === 'subscribed' ? 'var(--success)' :
+    state === 'unsupported' || state === 'denied' ? 'var(--danger)' :
+    'var(--text-tertiary)';
 
   return (
     <>
       <PageHeader title="Settings" accent="neutral" />
 
-      <div className="card" style={{ marginBottom: 22 }}>
-        <div className="section-title">Notifications</div>
+      <ListRow.Group label="Notifications">
+        <ListRow
+          leading={<Bell size={16} strokeWidth={1.75} />}
+          title="Push notifications"
+          subtitle="On-device alerts for habits, tasks, workouts"
+          trailing={<span style={{ color: pushStatusTone, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{pushStatusLabel}</span>}
+          chevron
+          onClick={() => setSheet('push')}
+        />
+        <ListRow
+          leading={<SlidersHorizontal size={16} strokeWidth={1.75} />}
+          title="Preferences"
+          subtitle="Times, quiet hours, per-notification toggles"
+          chevron
+          onClick={() => setSheet('prefs')}
+          disabled={state !== 'subscribed'}
+        />
+        <ListRow
+          leading={<Stethoscope size={16} strokeWidth={1.75} />}
+          title="Diagnostics"
+          subtitle="Cron health, subscriptions, recent log"
+          chevron
+          onClick={() => setSheet('diagnostics')}
+          disabled={state !== 'subscribed'}
+        />
+      </ListRow.Group>
 
-        {state === 'unsupported' && (
-          <div className="empty-state" style={{ textAlign: 'left' }}>
-            This browser doesn&apos;t support Web Push. Try the latest Safari (iOS 16.4+) or Chrome.
-          </div>
-        )}
+      <ListRow.Group label="Health & Apple Watch">
+        <ListRow
+          leading={<Activity size={16} strokeWidth={1.75} />}
+          title="Health import"
+          subtitle="Steps + sleep webhook + iOS Shortcut setup"
+          chevron
+          onClick={() => setSheet('health')}
+        />
+      </ListRow.Group>
 
-        {state === 'needs-install' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-secondary)', fontSize: 14 }}>
-              <Smartphone size={18} strokeWidth={1.75} />
-              <span>Install to your home screen first — iOS only allows push notifications from installed PWAs.</span>
-            </div>
-            <ol style={{ margin: 0, paddingLeft: 22, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7 }}>
-              <li>Open this page in <strong>Safari</strong> (not Chrome).</li>
-              <li>Tap the <Share size={12} style={{ display: 'inline', verticalAlign: '-2px' }} /> share button at the bottom.</li>
-              <li>Scroll and tap <strong>&ldquo;Add to Home Screen&rdquo;</strong> <Plus size={12} style={{ display: 'inline', verticalAlign: '-2px' }} />.</li>
-              <li>Open the Change icon from your home screen, come back here, and tap Enable.</li>
-            </ol>
-          </div>
-        )}
+      {/* Detail sheets ------------------------------------------------------ */}
+      <BottomSheet open={sheet === 'push'} onClose={() => setSheet(null)} title="Push notifications">
+        <PushSheetContent
+          state={state}
+          busy={busy}
+          onSubscribe={subscribe}
+          onSendTest={sendTest}
+          onUnsubscribe={unsubscribe}
+        />
+      </BottomSheet>
 
-        {state === 'denied' && (
-          <div className="empty-state" style={{ textAlign: 'left' }}>
-            You previously denied notifications. Go to iOS Settings → Notifications → Change and allow them, then come back.
-          </div>
-        )}
+      <BottomSheet open={sheet === 'prefs'} onClose={() => setSheet(null)} title="Preferences">
+        <NotificationPrefsCard />
+      </BottomSheet>
 
-        {state === 'idle' && (
-          <button
-            onClick={subscribe}
-            disabled={busy}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 10,
-              padding: '12px 18px', borderRadius: 12,
-              background: 'rgba(107,227,164,0.12)', border: '1px solid rgba(107,227,164,0.3)',
-              color: 'var(--success)', fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 700,
-              cursor: busy ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent',
-            }}
-          >
-            <Bell size={16} strokeWidth={1.75} /> Enable notifications
-          </button>
-        )}
+      <BottomSheet open={sheet === 'diagnostics'} onClose={() => setSheet(null)} title="Diagnostics">
+        <DiagnosticsPanel />
+      </BottomSheet>
 
-        {state === 'subscribed' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--success)', fontSize: 13 }}>
-              <Check size={15} strokeWidth={2} /> This device is subscribed.
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                onClick={sendTest}
-                disabled={busy}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '8px 14px', borderRadius: 10,
-                  background: 'transparent', border: '1px solid rgba(255,255,255,0.12)',
-                  color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11,
-                  letterSpacing: '0.06em', textTransform: 'uppercase',
-                  cursor: busy ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent',
-                }}
-              >
-                Send test push
-              </button>
-              <button
-                onClick={unsubscribe}
-                disabled={busy}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '8px 14px', borderRadius: 10,
-                  background: 'transparent', border: '1px solid rgba(255,107,107,0.28)',
-                  color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontSize: 11,
-                  letterSpacing: '0.06em', textTransform: 'uppercase',
-                  cursor: busy ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent',
-                }}
-              >
-                <BellOff size={12} strokeWidth={1.75} /> Turn off
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {state === 'subscribed' && <NotificationPrefsCard />}
-      <HealthImportCard />
-      {state === 'subscribed' && <DiagnosticsPanel />}
+      <BottomSheet open={sheet === 'health'} onClose={() => setSheet(null)} title="Health import">
+        <HealthImportCard />
+      </BottomSheet>
     </>
+  );
+}
+
+// Inline the previous "notifications card" body, unchanged behavior; just
+// hosted inside the bottom sheet now.
+function PushSheetContent({
+  state, busy, onSubscribe, onSendTest, onUnsubscribe,
+}: {
+  state: State; busy: boolean;
+  onSubscribe: () => void; onSendTest: () => void; onUnsubscribe: () => void;
+}) {
+  return (
+    <div style={{ padding: '18px 16px 24px' }}>
+      {state === 'unsupported' && (
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          This browser doesn&apos;t support Web Push. Try the latest Safari (iOS 16.4+) or Chrome.
+        </div>
+      )}
+
+      {state === 'needs-install' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-secondary)', fontSize: 14 }}>
+            <Smartphone size={18} strokeWidth={1.75} />
+            <span>Install to your home screen first — iOS only allows push notifications from installed PWAs.</span>
+          </div>
+          <ol style={{ margin: 0, paddingLeft: 22, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7 }}>
+            <li>Open this page in <strong>Safari</strong> (not Chrome).</li>
+            <li>Tap the <Share size={12} style={{ display: 'inline', verticalAlign: '-2px' }} /> share button at the bottom.</li>
+            <li>Scroll and tap <strong>&ldquo;Add to Home Screen&rdquo;</strong> <Plus size={12} style={{ display: 'inline', verticalAlign: '-2px' }} />.</li>
+            <li>Open the Change icon from your home screen, come back here, and tap Enable.</li>
+          </ol>
+        </div>
+      )}
+
+      {state === 'denied' && (
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          You previously denied notifications. Go to iOS Settings → Notifications → Change and allow them, then come back.
+        </div>
+      )}
+
+      {state === 'idle' && (
+        <button
+          onClick={onSubscribe}
+          disabled={busy}
+          className="btn-tonal btn-tonal-home"
+        >
+          <Bell size={16} strokeWidth={1.75} style={{ marginRight: 8 }} /> Enable notifications
+        </button>
+      )}
+
+      {state === 'subscribed' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--success)', fontSize: 13 }}>
+            <Check size={15} strokeWidth={2} /> This device is subscribed.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={onSendTest} disabled={busy} className="btn-secondary" style={{ fontSize: 12 }}>
+              Send test push
+            </button>
+            <button onClick={onUnsubscribe} disabled={busy} className="btn-danger" style={{ fontSize: 12 }}>
+              <BellOff size={12} strokeWidth={1.75} style={{ marginRight: 6 }} /> Turn off
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
