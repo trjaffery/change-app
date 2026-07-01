@@ -32,11 +32,19 @@ export default function PageHeader({
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
+    // Default rootMargin — the sentinel sits at the bottom of the large-title
+    // wrap. While it's inside the viewport the large title is (at least
+    // partially) still visible, so the sticky bar stays hidden. Once the
+    // sentinel scrolls above the viewport top, `isIntersecting` flips false
+    // and the sticky bar fades in. Prior rootMargin of `0px 0px -100% 0px`
+    // was wrong — it shrank the root to a top sliver and made the sentinel
+    // read as not-intersecting on page load, so the sticky showed even
+    // before any scroll.
     const io = new IntersectionObserver(
       entries => {
         for (const e of entries) setCollapsed(!e.isIntersecting);
       },
-      { threshold: 0, rootMargin: '0px 0px -100% 0px' },
+      { threshold: 0 },
     );
     io.observe(sentinel);
     return () => io.disconnect();
