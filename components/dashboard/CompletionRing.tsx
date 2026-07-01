@@ -89,7 +89,7 @@ export default function CompletionRing({ done, total }: Props) {
   }
 
   return (
-    <div className="card" style={{ marginBottom: 22 }}>
+    <div className="card card-raised card-accent-home" style={{ marginBottom: 22 }}>
       <style>{`
         @keyframes ring-pulse {
           0%, 100% { transform: scale(1); }

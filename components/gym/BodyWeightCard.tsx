@@ -78,7 +78,7 @@ export default function BodyWeightCard() {
   const showInput = editing || !todayEntry;
 
   return (
-    <div className="card" style={{ marginBottom: 22 }}>
+    <div className="card card-raised card-accent-gym" style={{ marginBottom: 22 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
         <div className="section-title" style={{ margin: 0 }}>Body weight</div>
         {streak > 0 && (

@@ -74,7 +74,7 @@ export default function StreakCard({
 
   if (loading) {
     return (
-      <div className="card" style={{ marginBottom: 22, minHeight: 220, textAlign: 'center' }}>
+      <div className="card card-raised card-accent-recovery" style={{ marginBottom: 22, minHeight: 220, textAlign: 'center' }}>
         <style>{`
           .sc-sk { background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08), rgba(255,255,255,0.04)); background-size: 200% 100%; animation: sc-shimmer 1.8s linear infinite; border-radius: 8px; display:inline-block; }
           @keyframes sc-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
@@ -104,7 +104,7 @@ export default function StreakCard({
           text-shadow: 0 1px 36px rgba(107,227,164,0.18);
         }
       `}</style>
-      <div className="card" style={{ marginBottom: 22, textAlign: 'center', padding: '28px 20px' }}>
+      <div className="card card-raised card-accent-recovery" style={{ marginBottom: 22, textAlign: 'center', padding: '28px 20px' }}>
         <div className="streak-num">{days}</div>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 10, fontFamily: 'var(--font-mono)' }}>
           days clean

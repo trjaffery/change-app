@@ -68,7 +68,7 @@ export default function PastEntries({
   if (entries.length === 0) return null;
 
   return (
-    <div className="card">
+    <div className="card card-accent-diary">
       <style>{`
         .pe-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
         .pe-search {

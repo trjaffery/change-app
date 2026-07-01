@@ -54,7 +54,7 @@ export default function MoodChart({ entries }: { entries: Entry[] }) {
   const tickIdx = [0, Math.round((days.length - 1) / 3), Math.round((2 * (days.length - 1)) / 3), days.length - 1];
 
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
+    <div className="card card-accent-diary" style={{ marginBottom: 16 }}>
       <div className="section-title">Mood · last 30 days</div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
         <defs>
