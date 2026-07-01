@@ -35,6 +35,9 @@ export default function DailyTasks({ onChange }: { onChange?: (done: number, tot
   const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  // Tracks the most recently-added task so we can play a one-shot slide-in
+  // animation on just that row. Cleared after the animation completes.
+  const [justAddedId, setJustAddedId] = useState<string | null>(null);
   const [newText, setNewText] = useState('');
   const [adding, setAdding] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -87,6 +90,8 @@ export default function DailyTasks({ onChange }: { onChange?: (done: number, tot
     const next = [...tasks, created];
     setTasks(next);
     notify(next);
+    setJustAddedId(created.id);
+    setTimeout(() => setJustAddedId(prev => (prev === created.id ? null : prev)), 500);
     setNewText('');
     inputRef.current?.focus();
   }
@@ -302,6 +307,13 @@ export default function DailyTasks({ onChange }: { onChange?: (done: number, tot
         .dt-row.reordering { z-index: 20; box-shadow: 0 12px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08); background: rgba(20,20,22,1); cursor: grabbing; touch-action: none; }
         .dt-drop-indicator { height: 0; border-top: 2px solid var(--success); margin: 2px 8px; border-radius: 1px; pointer-events: none; box-shadow: 0 0 8px rgba(107,227,164,0.4); animation: dt-pulse 1.2s ease-in-out infinite; }
         @keyframes dt-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        /* One-shot slide-in for a task that was just added. Global reduced-motion
+           rule collapses this to instant. */
+        .dt-row.just-added { animation: dt-in 380ms cubic-bezier(0.22,1,0.36,1) both; }
+        @keyframes dt-in {
+          from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
         .dt-check { width: 22px; height: 22px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.18); background: transparent; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; margin-top: 2px; }
         .dt-check.done { background: rgba(107,227,164,0.15); border-color: var(--success); }
         .dt-prio { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; align-self: center; }
@@ -353,7 +365,7 @@ export default function DailyTasks({ onChange }: { onChange?: (done: number, tot
             {indicatorBefore && <div className="dt-drop-indicator" />}
             <div
               ref={el => { if (el) rowRefs.current.set(t.id, el); else rowRefs.current.delete(t.id); }}
-              className={`dt-row${isDragged ? ' reordering' : ''}`}
+              className={`dt-row${isDragged ? ' reordering' : ''}${justAddedId === t.id ? ' just-added' : ''}`}
               onPointerDown={e => onRowPointerDown(e, t.id, idx)}
               onPointerMove={onRowPointerMove}
               onPointerUp={onRowPointerUp}
