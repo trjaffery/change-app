@@ -6,7 +6,6 @@ import WorkoutSession from '@/components/gym/WorkoutSession';
 import ProgressGraph from '@/components/gym/ProgressGraph';
 import WorkoutHistory from '@/components/gym/WorkoutHistory';
 import ExerciseSparklineGrid from '@/components/gym/ExerciseSparklineGrid';
-import WorkoutAdherenceCard from '@/components/gym/WorkoutAdherenceCard';
 import BodyWeightCard from '@/components/gym/BodyWeightCard';
 import HealthMetricsCard from '@/components/gym/HealthMetricsCard';
 import PageHeader from '@/components/layout/PageHeader';
@@ -70,37 +69,39 @@ export default function GymPage() {
             </button>
           </div>
           {showSettings && (
-            <div className="card" style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--text-primary)' }}>Rest timer between sets</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                {REST_PRESETS.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => updateRestDuration(s)}
-                    style={{
-                      padding: '7px 14px', borderRadius: 10, fontSize: 13,
-                      background: restDuration === s ? 'rgba(107,227,164,0.12)' : 'rgba(255,255,255,0.04)',
-                      border: `1px solid ${restDuration === s ? 'rgba(107,227,164,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                      color: restDuration === s ? 'var(--success)' : 'var(--text-secondary)',
-                      cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                    }}
-                  >
-                    {fmtPreset(s)}
-                  </button>
-                ))}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input
-                    type="number" min={10} max={600} value={restDuration}
-                    onChange={e => updateRestDuration(Number(e.target.value))}
-                    className="text-input"
-                    style={{ width: 70, fontFamily: 'var(--font-mono)', fontSize: 13 }}
-                  />
-                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>sec</span>
+            <>
+              <div className="card" style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--text-primary)' }}>Rest timer between sets</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {REST_PRESETS.map(s => (
+                    <button
+                      key={s}
+                      onClick={() => updateRestDuration(s)}
+                      style={{
+                        padding: '7px 14px', borderRadius: 10, fontSize: 13,
+                        background: restDuration === s ? 'rgba(107,227,164,0.12)' : 'rgba(255,255,255,0.04)',
+                        border: `1px solid ${restDuration === s ? 'rgba(107,227,164,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                        color: restDuration === s ? 'var(--success)' : 'var(--text-secondary)',
+                        cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {fmtPreset(s)}
+                    </button>
+                  ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="number" min={10} max={600} value={restDuration}
+                      onChange={e => updateRestDuration(Number(e.target.value))}
+                      className="text-input"
+                      style={{ width: 70, fontFamily: 'var(--font-mono)', fontSize: 13 }}
+                    />
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>sec</span>
+                  </div>
                 </div>
               </div>
-            </div>
+              <SplitManager />
+            </>
           )}
-          <SplitManager />
           <button
             className="btn-primary"
             style={{ width: '100%', padding: '14px', fontSize: 15, fontWeight: 700, marginBottom: 22 }}
@@ -110,7 +111,6 @@ export default function GymPage() {
           </button>
           <BodyWeightCard />
           <HealthMetricsCard />
-          <WorkoutAdherenceCard refreshKey={graphKey} />
           <WorkoutHistory refreshKey={graphKey} />
           <ExerciseSparklineGrid refreshKey={graphKey} />
           <ProgressGraph refreshKey={graphKey} />

@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil, Plus, X, LifeBuoy } from 'lucide-react';
+import { Pencil, Plus, X, LifeBuoy, FastForward } from 'lucide-react';
 import { useToast } from '@/components/layout/Toast';
 
 interface Urge { id: string; intensity: number; note: string; tags?: string[]; triggers?: string[]; halt?: string[]; is_crisis?: boolean; created_at: string }
@@ -25,7 +25,7 @@ function parseRpPlanTriggers(s: string): string[] {
   return s.split(/[\n,]/).map(x => x.trim()).filter(Boolean);
 }
 
-export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void }) {
+export default function UrgeLog({ onUrgeLogged, onPlayTape }: { onUrgeLogged?: () => void; onPlayTape?: () => void }) {
   const toast = useToast();
   const [urges, setUrges] = useState<Urge[]>([]);
   const [total, setTotal] = useState(0);
@@ -235,7 +235,24 @@ export default function UrgeLog({ onUrgeLogged }: { onUrgeLogged?: () => void })
         .tag-input { padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(242,192,99,0.4); background: rgba(242,192,99,0.05); color: var(--text-primary); font-size: 11px; font-weight: 600; outline: none; min-width: 90px; max-width: 160px; font-family: var(--font-sans); }
       `}</style>
       <div className="card" style={{ marginBottom: 22 }} id="urge-log-card">
-        <div className="section-title">Log an Urge</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div className="section-title" style={{ margin: 0 }}>Log an Urge</div>
+          {onPlayTape && (
+            <button
+              onClick={onPlayTape}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 10px', borderRadius: 8,
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)',
+                fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <FastForward size={11} strokeWidth={2} /> Play tape
+            </button>
+          )}
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <label className="urge-label" htmlFor="urge-intensity">Intensity</label>

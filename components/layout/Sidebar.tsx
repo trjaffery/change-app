@@ -141,7 +141,7 @@ export default function Sidebar() {
             /* Own compositor layer + paint isolation — iOS Safari otherwise
                tears the pill mid-scroll (the "nav shows in the middle of the
                page" glitch). translateZ alone isn't always enough with the
-               border-radius + backdrop-filter combo, so `isolation` seals it. */
+               border-radius + backdrop-filter combo, so 'isolation' seals it. */
             transform: translateZ(0);
             -webkit-transform: translateZ(0);
             will-change: transform;

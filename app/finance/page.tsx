@@ -468,6 +468,7 @@ export default function FinancePage() {
 
   // NW history
   const [nwHistory, setNwHistory] = useState<{ total: number; snapshot_date: string }[]>([]);
+  const [nwWindow, setNwWindow] = useState<30 | 90 | 365 | 'all'>(90);
   const hasSnapshotted = useRef(false);
 
   const fetchItems = useCallback(async () => {
@@ -900,38 +901,8 @@ export default function FinancePage() {
             <div className="empty-state">Loading…</div>
           ) : (
             <>
-              {/* Summary + donut */}
-              <div className="card" style={{ marginBottom: 16 }}>
-                <div className="nw-summary">
-                  <DonutChart data={donutData} netWorth={totalNetWorth} />
-                  <div className="nw-legend">
-                    {([['bank', byCategory.bank + plaidBank], ['stocks', byCategory.stocks + plaidInvestments], ['crypto', byCategory.crypto], ['other', byCategory.other]] as [Category, number][]).map(([cat, val]) => (
-                      <div key={cat} className="legend-row">
-                        <div className="legend-dot" style={{ background: CATEGORY_META[cat].color }} />
-                        <span className="legend-label">{CATEGORY_META[cat].label}</span>
-                        <span className="legend-val">{fmt(val)}</span>
-                        {totalAssets > 0 && val > 0 && (
-                          <span className="legend-pct">{Math.round(val / totalAssets * 100)}%</span>
-                        )}
-                      </div>
-                    ))}
-                    {plaidLiabilities > 0 && (
-                      <div className="legend-row">
-                        <div className="legend-dot" style={{ background: 'var(--danger)' }} />
-                        <span className="legend-label">Liabilities</span>
-                        <span className="legend-val" style={{ color: 'var(--danger)' }}>−{fmt(plaidLiabilities)}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {nwHistory.length >= 2 && (
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                    <NWChart data={nwHistory} />
-                  </div>
-                )}
-              </div>
-
-              {/* Cashflow this month */}
+              {/* Cashflow this month — promoted above net worth: month-to-month
+                  decisions live here, not in the total. */}
               <div className="card" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>This month</div>
@@ -1040,6 +1011,66 @@ export default function FinancePage() {
                     )}
                   </>
                 )}
+              </div>
+
+              {/* Net worth summary + donut + history */}
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="nw-summary">
+                  <DonutChart data={donutData} netWorth={totalNetWorth} />
+                  <div className="nw-legend">
+                    {([['bank', byCategory.bank + plaidBank], ['stocks', byCategory.stocks + plaidInvestments], ['crypto', byCategory.crypto], ['other', byCategory.other]] as [Category, number][]).map(([cat, val]) => (
+                      <div key={cat} className="legend-row">
+                        <div className="legend-dot" style={{ background: CATEGORY_META[cat].color }} />
+                        <span className="legend-label">{CATEGORY_META[cat].label}</span>
+                        <span className="legend-val">{fmt(val)}</span>
+                        {totalAssets > 0 && val > 0 && (
+                          <span className="legend-pct">{Math.round(val / totalAssets * 100)}%</span>
+                        )}
+                      </div>
+                    ))}
+                    {plaidLiabilities > 0 && (
+                      <div className="legend-row">
+                        <div className="legend-dot" style={{ background: 'var(--danger)' }} />
+                        <span className="legend-label">Liabilities</span>
+                        <span className="legend-val" style={{ color: 'var(--danger)' }}>−{fmt(plaidLiabilities)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {nwHistory.length >= 2 && (() => {
+                  const visible = nwWindow === 'all'
+                    ? nwHistory
+                    : nwHistory.filter(h => new Date(h.snapshot_date + 'T12:00:00').getTime() >= Date.now() - nwWindow * 86400000);
+                  return (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 6 }}>
+                        {([30, 90, 365, 'all'] as const).map(w => {
+                          const active = nwWindow === w;
+                          return (
+                            <button
+                              key={String(w)}
+                              onClick={() => setNwWindow(w)}
+                              style={{
+                                border: '1px solid rgba(255,255,255,0.08)',
+                                background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                                color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                                padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
+                                fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+                              }}
+                            >
+                              {w === 'all' ? 'All' : `${w}d`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {visible.length >= 2 ? <NWChart data={visible} /> : (
+                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textAlign: 'center', padding: '12px 0' }}>
+                          Not enough snapshots in this window yet.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Category sections */}

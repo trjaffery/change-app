@@ -11,8 +11,36 @@ interface Session {
   split_days: { name: string } | null;
 }
 interface SetRow { id: string; exercise: string; reps: number; weight: number }
+interface SplitDay { day_of_week: number[] | null; name: string }
+interface Split { is_active: boolean; split_days: SplitDay[] }
 
 const PAGE_SIZE = 10;
+const ADHERENCE_WINDOW_DAYS = 14;
+
+interface Adherence { pct: number; logged: number; planned: number }
+async function fetchAdherence(sessions: Session[]): Promise<Adherence | null> {
+  try {
+    const res = await fetch('/api/gym/splits');
+    const splits = (await res.json()) as Split[];
+    const active = (Array.isArray(splits) ? splits : []).find(s => s.is_active);
+    if (!active) return null;
+    const dows = new Set<number>();
+    for (const d of active.split_days ?? []) for (const dow of d.day_of_week ?? []) dows.add(dow);
+    if (dows.size === 0) return null;
+    const today = new Date();
+    let planned = 0;
+    for (let i = 0; i < ADHERENCE_WINDOW_DAYS; i++) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      if (dows.has(d.getDay())) planned++;
+    }
+    const cutoffMs = Date.now() - ADHERENCE_WINDOW_DAYS * 86400000;
+    const loggedDates = new Set<string>();
+    for (const s of sessions) if (new Date(s.date + 'T12:00:00').getTime() >= cutoffMs) loggedDates.add(s.date);
+    const logged = loggedDates.size;
+    const pct = planned > 0 ? Math.min(100, Math.round((logged / planned) * 100)) : 0;
+    return { pct, logged, planned };
+  } catch { return null; }
+}
 
 function fmtDate(dateStr: string) {
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -28,6 +56,7 @@ export default function WorkoutHistory({ refreshKey }: { refreshKey: number }) {
   const [detail, setDetail] = useState<Record<string, SetRow[]>>({});
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [adherence, setAdherence] = useState<Adherence | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
@@ -48,6 +77,13 @@ export default function WorkoutHistory({ refreshKey }: { refreshKey: number }) {
     setExpanded(null);
     fetchPage(0, true);
   }, [fetchPage, refreshKey]);
+
+  // Compute adherence from the first page of sessions — 10 covers a 14-day window
+  // for any realistic schedule.
+  useEffect(() => {
+    if (sessions.length === 0) { setAdherence(null); return; }
+    fetchAdherence(sessions).then(setAdherence);
+  }, [sessions]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -105,7 +141,18 @@ export default function WorkoutHistory({ refreshKey }: { refreshKey: number }) {
         .wh-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; cursor:pointer; border-radius:8px; transition:background 0.12s; }
         .wh-row:hover { background:rgba(255,255,255,0.02); }
       `}</style>
-      <div className="section-title">History</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
+        <div className="section-title" style={{ margin: 0 }}>History</div>
+        {adherence && (() => {
+          const tone = adherence.pct >= 80 ? '#6BE3A4' : adherence.pct >= 50 ? '#F2C063' : '#FF6B6B';
+          return (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
+              <span style={{ color: tone, fontWeight: 700 }}>{adherence.pct}%</span>
+              <span> · {adherence.logged}/{adherence.planned} · 14d</span>
+            </div>
+          );
+        })()}
+      </div>
       {sessions.map((session, idx) => {
         const label = session.split_days?.name ?? 'Free workout';
         const dateStr = fmtDate(session.date);

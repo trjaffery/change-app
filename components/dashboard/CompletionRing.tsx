@@ -5,6 +5,7 @@ import { getActiveDateString } from '@/lib/dates';
 const CIRC = 2 * Math.PI * 52;
 
 interface Props { done: number; total: number }
+interface BriefingPayload { line?: string; skip?: boolean; error?: string }
 
 // Day phases keyed to the app's 6 AM day boundary.
 // Each entry: [startHour, label, color]
@@ -64,6 +65,34 @@ export default function CompletionRing({ done, total }: Props) {
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(id);
+  }, []);
+
+  // Daily briefing — one AI-generated setup line, cached per active day.
+  // Rendered below the hero as an italic quote when present.
+  const [briefing, setBriefing] = useState<string | null>(null);
+  useEffect(() => {
+    const cacheKey = `briefing_${getActiveDateString()}`;
+    const cached = typeof window !== 'undefined' ? localStorage.getItem(cacheKey) : null;
+    if (cached === '__skip__') return;
+    if (cached) { setBriefing(cached); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000);
+        const res = await fetch('/api/ai/briefing', { method: 'POST', signal: controller.signal });
+        clearTimeout(timeout);
+        const data = await res.json() as BriefingPayload;
+        if (cancelled) return;
+        if (data.skip || !data.line) {
+          localStorage.setItem(cacheKey, '__skip__');
+        } else {
+          localStorage.setItem(cacheKey, data.line);
+          setBriefing(data.line);
+        }
+      } catch { /* silent — briefing is optional */ }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Phase chip + remaining (only render after hydration so SSR/CSR match).
@@ -160,6 +189,17 @@ export default function CompletionRing({ done, total }: Props) {
           )}
         </div>
       </div>
+      {briefing && (
+        <div style={{
+          marginTop: 18, paddingTop: 14,
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          fontFamily: 'var(--font-serif)', fontStyle: 'italic',
+          fontSize: 14, lineHeight: 1.5, color: 'var(--text-secondary)',
+          textAlign: 'center',
+        }}>
+          {briefing}
+        </div>
+      )}
     </div>
   );
 }

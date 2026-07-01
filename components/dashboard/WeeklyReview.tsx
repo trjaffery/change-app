@@ -40,8 +40,8 @@ export default function WeeklyReview() {
     } finally { setLoading(false); }
   }
 
-  // Phase 3 #12: auto-trigger on first load of week if no cache yet, not just
-  // Sunday/Monday. Anyone opening the app mid-week should get this week's review.
+  // Only auto-generate on Sun/Mon — the natural end-of-week window. Any other
+  // day, the cached review (if any) still shows; otherwise the card hides.
   useEffect(() => {
     (async () => {
       try {
@@ -52,7 +52,8 @@ export default function WeeklyReview() {
           setGeneratedAt(cache.generated_at);
           return;
         }
-        if (!autoFired.current) {
+        const dow = new Date().getDay();
+        if ((dow === 0 || dow === 1) && !autoFired.current) {
           autoFired.current = true;
           regenerate();
         }

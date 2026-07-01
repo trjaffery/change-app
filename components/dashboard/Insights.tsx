@@ -1,6 +1,5 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
 
 interface Correlation {
   id: string;
@@ -11,17 +10,10 @@ interface Correlation {
   confidence: 'high' | 'low';
 }
 
-const STRENGTH_COLOR: Record<Correlation['strength'], string> = {
-  strong: 'var(--success)',
-  moderate: '#F2C063',
-  weak: 'var(--text-tertiary)',
-};
-
 export default function Insights() {
   const [correlations, setCorrelations] = useState<Correlation[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showWeak, setShowWeak] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,9 +33,9 @@ export default function Insights() {
     return () => { cancelled = true; };
   }, []);
 
-  const headline = correlations?.[0] ?? null;
-  const middle = (correlations ?? []).filter((c, i) => i > 0 && c.strength !== 'weak');
-  const weak = (correlations ?? []).filter((c, i) => i > 0 && c.strength === 'weak');
+  const strong = (correlations ?? []).filter(c => c.strength === 'strong');
+  const headline = strong[0] ?? null;
+  const rest = strong.slice(1);
 
   return (
     <div className="card" style={{ marginBottom: 22 }}>
@@ -71,28 +63,11 @@ export default function Insights() {
         .ins-row .dot { flex-shrink: 0; margin-top: 6px; width: 7px; height: 7px; border-radius: 50%; }
         .ins-row .finding { font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
         .ins-row .action { font-size: 12px; color: var(--text-tertiary); line-height: 1.5; margin: 4px 0 0; font-style: italic; }
-        .ins-row.weak .finding { color: var(--text-tertiary); }
-        .ins-row.weak .action { opacity: 0.7; }
         .ins-section-label {
           font-family: var(--font-mono); font-size: 9px; font-weight: 700;
           letter-spacing: 0.14em; text-transform: uppercase;
           color: var(--text-tertiary); margin: 14px 0 6px;
         }
-        .ins-weak-toggle {
-          margin-top: 10px;
-          background: transparent; border: 1px dashed rgba(255,255,255,0.12);
-          color: var(--text-tertiary);
-          padding: 8px 12px; border-radius: 10px;
-          font-family: var(--font-mono); font-size: 10px;
-          letter-spacing: 0.1em; text-transform: uppercase;
-          cursor: pointer; width: 100%;
-          display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-          -webkit-tap-highlight-color: transparent;
-          transition: color 160ms ease;
-        }
-        .ins-weak-toggle:hover { color: var(--text-secondary); }
-        .ins-weak-toggle .chev { transition: transform 200ms ease; }
-        .ins-weak-toggle.open .chev { transform: rotate(180deg); }
       `}</style>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -114,26 +89,24 @@ export default function Insights() {
         </div>
       ) : errorMsg ? (
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic', wordBreak: 'break-word' }}>Error: {errorMsg}</p>
-      ) : !correlations || correlations.length === 0 ? (
+      ) : !headline ? (
         <p style={{ fontSize: 13, color: 'var(--text-tertiary)', margin: 0, lineHeight: 1.6 }}>
           No strong patterns surfaced in the last 30 days. Cross-domain signals need a mix of habits, workouts, and recovery logs to show up — recovery-only data shows up in the Patterns card on your recovery page instead.
         </p>
       ) : (
         <>
-          {headline && (
-            <div className="ins-headline">
-              <p className="ins-headline-finding">{headline.finding}</p>
-              {headline.action && <p className="ins-headline-action">→ {headline.action}</p>}
-            </div>
-          )}
+          <div className="ins-headline">
+            <p className="ins-headline-finding">{headline.finding}</p>
+            {headline.action && <p className="ins-headline-action">→ {headline.action}</p>}
+          </div>
 
-          {middle.length > 0 && (
+          {rest.length > 0 && (
             <>
               <div className="ins-section-label">Also showing up</div>
               <div>
-                {middle.map(c => (
+                {rest.map(c => (
                   <div key={c.id} className="ins-row">
-                    <span className="dot" style={{ background: STRENGTH_COLOR[c.strength] }} />
+                    <span className="dot" style={{ background: 'var(--success)' }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p className="finding">{c.finding}</p>
                       {c.action && <p className="action">→ {c.action}</p>}
@@ -141,28 +114,6 @@ export default function Insights() {
                   </div>
                 ))}
               </div>
-            </>
-          )}
-
-          {weak.length > 0 && (
-            <>
-              <button className={`ins-weak-toggle${showWeak ? ' open' : ''}`} onClick={() => setShowWeak(v => !v)}>
-                {showWeak ? 'Hide' : 'Show'} {weak.length} weaker signal{weak.length === 1 ? '' : 's'}
-                <ChevronDown size={11} strokeWidth={2.25} className="chev" />
-              </button>
-              {showWeak && (
-                <div style={{ marginTop: 6 }}>
-                  {weak.map(c => (
-                    <div key={c.id} className="ins-row weak">
-                      <span className="dot" style={{ background: STRENGTH_COLOR[c.strength] }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p className="finding">{c.finding}</p>
-                        {c.action && <p className="action">→ {c.action}</p>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </>
           )}
         </>

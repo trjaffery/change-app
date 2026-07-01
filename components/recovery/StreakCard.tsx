@@ -16,14 +16,19 @@ function computeDaysFromIso(iso: string): number {
 }
 
 interface Relapse { id: string; created_at: string }
+interface MomentumStats {
+  current_streak: number | null;
+  longest_streak: number | null;
+  crisis_survived: number;
+  mood_high_days_30: number;
+  urges_no_act: number;
+  urges_no_act_since: string | null;
+}
 
 /**
  * Streak anchors to whichever is more recent: the user's `sobriety_start`
- * setting OR the most recent relapse. Previously this only read the setting,
- * so logging a relapse never reset the displayed streak (a real bug).
- *
- * The parent passes `refreshKey` so RelapseLog can bump it after logging and
- * the streak re-anchors immediately without a page reload.
+ * setting OR the most recent relapse. Momentum stats (previously a separate
+ * card) live below the milestones — they're all "how am I doing" numbers.
  */
 export default function StreakCard({
   onStreakChange,
@@ -35,16 +40,15 @@ export default function StreakCard({
   const [anchorIso, setAnchorIso] = useState<string>('');
   const [days, setDays] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [momentum, setMomentum] = useState<MomentumStats | null>(null);
 
   async function loadStreak() {
-    // Pull sobriety_start + latest relapse in parallel; pick max.
     const [settingsRes, relapsesRes] = await Promise.all([
       fetch('/api/recovery/settings?key=sobriety_start').then(r => r.json()).catch(() => ({})),
       fetch('/api/recovery/relapses').then(r => r.json()).catch(() => []),
     ]);
 
     let sobrietyIso: string = settingsRes.sobriety_start ?? '';
-    // Seed the setting on first use so the streak has a stable origin date.
     if (!sobrietyIso) {
       sobrietyIso = toDateString(new Date());
       await fetch('/api/recovery/settings', {
@@ -56,7 +60,6 @@ export default function StreakCard({
     const sobrietyStartMs = new Date(sobrietyIso + 'T00:00:00').getTime();
 
     const relapses = (Array.isArray(relapsesRes) ? relapsesRes : []) as Relapse[];
-    // /api/recovery/relapses returns newest-first per route convention; guard either way.
     const latestRelapseMs = relapses
       .map(r => new Date(r.created_at).getTime())
       .reduce((max, t) => Math.max(max, t), 0);
@@ -72,6 +75,18 @@ export default function StreakCard({
 
   useEffect(() => { loadStreak(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/recovery/momentum');
+        if (res.ok) {
+          const data = await res.json();
+          setMomentum(data.stats ?? null);
+        }
+      } catch { /* leave hidden */ }
+    })();
+  }, [refreshKey]);
+
   if (loading) {
     return (
       <div className="card card-raised card-accent-recovery" style={{ marginBottom: 22, minHeight: 220, textAlign: 'center' }}>
@@ -85,7 +100,6 @@ export default function StreakCard({
     );
   }
 
-  // The "since" label uses YYYY-MM-DD; convert the ISO anchor back into that shape.
   const anchorDate = anchorIso.split('T')[0];
 
   return (
@@ -103,6 +117,27 @@ export default function StreakCard({
           margin-bottom: 4px;
           text-shadow: 0 1px 36px rgba(107,227,164,0.18);
         }
+        .sc-momentum {
+          margin-top: 24px;
+          padding-top: 20px;
+          border-top: 1px solid rgba(255,255,255,0.06);
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 8px;
+        }
+        .sc-mo-stat { text-align: center; }
+        .sc-mo-value {
+          font-family: var(--font-mono); font-size: 20px; font-weight: 800;
+          color: var(--text-primary); line-height: 1;
+        }
+        .sc-mo-label {
+          font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+          letter-spacing: 0.08em; text-transform: uppercase;
+          color: var(--text-tertiary); margin-top: 6px;
+        }
+        @media (max-width: 480px) {
+          .sc-momentum { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        }
       `}</style>
       <div className="card card-raised card-accent-recovery" style={{ marginBottom: 22, textAlign: 'center', padding: '28px 20px' }}>
         <div className="streak-num">{days}</div>
@@ -115,6 +150,27 @@ export default function StreakCard({
             <div key={m.days} className={`milestone-badge${days >= m.days ? ' earned' : ''}`}>{m.label}</div>
           ))}
         </div>
+
+        {momentum && (
+          <div className="sc-momentum">
+            <div className="sc-mo-stat">
+              <div className="sc-mo-value">{momentum.longest_streak ?? '—'}</div>
+              <div className="sc-mo-label">Longest</div>
+            </div>
+            <div className="sc-mo-stat">
+              <div className="sc-mo-value">{momentum.crisis_survived}</div>
+              <div className="sc-mo-label">Crises survived</div>
+            </div>
+            <div className="sc-mo-stat">
+              <div className="sc-mo-value">{momentum.urges_no_act}</div>
+              <div className="sc-mo-label">Urges resisted</div>
+            </div>
+            <div className="sc-mo-stat">
+              <div className="sc-mo-value">{momentum.mood_high_days_30}</div>
+              <div className="sc-mo-label">Good mood days</div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

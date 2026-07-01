@@ -6,11 +6,6 @@ import { toDateString } from '@/lib/dates';
 interface Row { date: string; steps: number | null; sleep_minutes: number | null }
 
 const WINDOW_DAYS = 7;
-// iOS looks shortcuts up by their exact name. These match the user's
-// device — the default "Get Contents of URL" name iOS auto-assigns when a
-// Shortcut isn't manually renamed.
-const STEPS_SHORTCUT_NAME = 'StepSync';
-const SLEEP_SHORTCUT_NAME = 'SleepSync';
 
 export default function HealthMetricsCard() {
   // Plain calendar today — matches Apple Health's tile and the date the iOS
@@ -40,13 +35,10 @@ export default function HealthMetricsCard() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [load]);
 
-  const syncStepsHref = `shortcuts://run-shortcut?name=${encodeURIComponent(STEPS_SHORTCUT_NAME)}`;
-  const syncSleepHref = `shortcuts://run-shortcut?name=${encodeURIComponent(SLEEP_SHORTCUT_NAME)}`;
-
   if (loading) {
     return (
       <div className="card" style={{ marginBottom: 22, minHeight: 140 }}>
-        <div className="section-title">Health</div>
+        <div className="section-title">Health · last {WINDOW_DAYS} days</div>
         <div style={{ height: 60, background: 'rgba(255,255,255,0.04)', borderRadius: 8 }} />
       </div>
     );
@@ -55,7 +47,7 @@ export default function HealthMetricsCard() {
   if (rows.length === 0) {
     return (
       <div className="card card-accent-gym" style={{ marginBottom: 22 }}>
-        <CardHeader syncStepsHref={syncStepsHref} syncSleepHref={syncSleepHref} />
+        <div className="section-title">Health · last {WINDOW_DAYS} days</div>
         <div className="empty-state" style={{ textAlign: 'left', fontSize: 12 }}>
           No data yet. Set up the iOS Shortcut in Settings → Health import to start syncing steps and sleep from your iPhone.
         </div>
@@ -77,7 +69,7 @@ export default function HealthMetricsCard() {
 
   return (
     <div className="card card-accent-gym" style={{ marginBottom: 22 }}>
-      <CardHeader syncStepsHref={syncStepsHref} syncSleepHref={syncSleepHref} />
+      <div className="section-title">Health · last {WINDOW_DAYS} days</div>
 
       <MetricRow
         icon={<Activity size={14} strokeWidth={1.75} />}
@@ -98,30 +90,6 @@ export default function HealthMetricsCard() {
         series={sleepSeries}
         color="#9F84FF"
       />
-    </div>
-  );
-}
-
-function CardHeader({ syncStepsHref, syncSleepHref }: { syncStepsHref: string; syncSleepHref: string }) {
-  const btn: React.CSSProperties = {
-    display: 'inline-flex', alignItems: 'center', gap: 5,
-    padding: '6px 10px', borderRadius: 8,
-    background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
-    color: 'var(--text-secondary)', textDecoration: 'none',
-    fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
-    WebkitTapHighlightColor: 'transparent',
-  };
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
-      <div className="section-title" style={{ margin: 0 }}>Health</div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <a href={syncStepsHref} style={btn} aria-label="Sync steps from Health">
-          <Activity size={11} strokeWidth={1.75} /> Steps
-        </a>
-        <a href={syncSleepHref} style={btn} aria-label="Sync sleep from Health">
-          <Moon size={11} strokeWidth={1.75} /> Sleep
-        </a>
-      </div>
     </div>
   );
 }
