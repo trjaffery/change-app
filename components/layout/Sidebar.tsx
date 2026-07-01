@@ -55,6 +55,11 @@ export default function Sidebar() {
           padding: 24px 10px 20px;
           overflow: hidden;
           transition: width var(--dur-base) var(--ease-out);
+          /* Own compositor layer — combined backdrop-filter + border-radius
+             on the child pill fools iOS Safari into tearing without this. */
+          transform: translateZ(0);
+          -webkit-transform: translateZ(0);
+          will-change: transform;
         }
         .nav-desktop:hover { width: var(--sidebar-w-hover); }
 
@@ -133,6 +138,15 @@ export default function Sidebar() {
             -webkit-backdrop-filter: blur(24px) saturate(1.3);
             box-shadow: var(--elev-2);
             padding: 6px;
+            /* Own compositor layer + paint isolation — iOS Safari otherwise
+               tears the pill mid-scroll (the "nav shows in the middle of the
+               page" glitch). translateZ alone isn't always enough with the
+               border-radius + backdrop-filter combo, so `isolation` seals it. */
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
+            will-change: transform;
+            isolation: isolate;
+            contain: layout paint style;
           }
           .nav-mobile-list {
             display: flex; flex: 1; align-items: stretch; justify-content: space-between;
