@@ -320,6 +320,28 @@ p, .ai-response, .ai-response p { text-wrap: pretty; }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
+   View Transitions — route-level cross-fade + persistent-element isolation.
+   Next.js 16 wraps <Link> nav in document.startViewTransition when the
+   experimental.viewTransition flag is on (see next.config.ts).
+   ────────────────────────────────────────────────────────────────────────── */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Sidebar (desktop rail + mobile bottom nav) and the floating settings gear
+   should stay put across navigations, not flicker with the page. Naming
+   each one pulls it out of the page snapshot. */
+.nav-desktop { view-transition-name: nav-desktop; }
+.nav-mobile  { view-transition-name: nav-mobile; }
+.settings-fab { view-transition-name: settings-fab; }
+
+/* The page title on each route is intentionally NOT shared — different
+   routes have different titles, so a shared name would morph "Change"
+   into "Gym" mid-fade which reads as jank rather than continuity. */
+
+/* ──────────────────────────────────────────────────────────────────────────
    Reduced motion — one global nuke rule so we don't have to remember to
    gate every keyframe in every component. Everything still functions; it
    just settles instantly.
