@@ -5,6 +5,7 @@ import SavedLabel from '@/components/diary/SavedLabel';
 import DiaryHeader from '@/components/diary/DiaryHeader';
 import MoodChart from '@/components/diary/MoodChart';
 import PastEntries from '@/components/diary/PastEntries';
+import PageHeader from '@/components/layout/PageHeader';
 
 interface Entry { date: string; body: string; mood: number | null; updated_at: string }
 
@@ -250,7 +251,7 @@ export default function DiaryPage() {
         @keyframes dr-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
       `}</style>
 
-      <h1 className="page-title">Diary</h1>
+      <PageHeader title="Diary" accent="diary" />
 
       <DiaryHeader entries={past} today={today} todayBody={isToday ? body : ''} total={pastTotal} />
 

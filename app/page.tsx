@@ -10,6 +10,7 @@ import HabitCalendar from '@/components/habits/HabitCalendar';
 import HabitCoach from '@/components/habits/HabitCoach';
 import WeeklyReview from '@/components/dashboard/WeeklyReview';
 import Insights from '@/components/dashboard/Insights';
+import PageHeader from '@/components/layout/PageHeader';
 
 export default function DashboardPage() {
   const [done, setDone] = useState(0);
@@ -18,7 +19,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <h1 className="page-title">Change</h1>
+      <PageHeader title="Change" accent="home" />
       <DailyBriefing />
       <TaskTicker />
       <CompletionRing done={done} total={total} />

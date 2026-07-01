@@ -6,33 +6,36 @@ import { House, NotebookPen, Dumbbell, HeartPulse, Wallet, Brain, type LucideIco
 /**
  * Hybrid navigation.
  *
- * - Mobile (≤ 640px): bottom tab bar, anchored to the home indicator via
- *   env(safe-area-inset-bottom). Icon + small label, full tap target.
- * - Desktop (> 640px): collapsed rail (icon only) that expands on hover.
+ * - Mobile (≤ 640px): floating pill bar hovering ~12px above the safe area,
+ *   with each active tab wearing its section accent color.
+ * - Desktop (> 640px): a wider collapsed rail (labels peek in on hover),
+ *   active section shown as a full-height left bar in that section's color.
  */
 
-interface NavItem { href: string; Icon: LucideIcon; label: string }
+type SectionKey = 'home' | 'diary' | 'gym' | 'recovery' | 'finance' | 'coach';
+interface NavItem { href: string; Icon: LucideIcon; label: string; section: SectionKey }
 
 const NAV: NavItem[] = [
-  { href: '/',         Icon: House,        label: 'Home' },
-  { href: '/diary',    Icon: NotebookPen,  label: 'Diary' },
-  { href: '/gym',      Icon: Dumbbell,     label: 'Gym' },
-  { href: '/recovery', Icon: HeartPulse,   label: 'Recovery' },
-  { href: '/finance',  Icon: Wallet,       label: 'Finance' },
-  { href: '/coach',    Icon: Brain,        label: 'Coach' },
+  { href: '/',         Icon: House,        label: 'Home',     section: 'home' },
+  { href: '/diary',    Icon: NotebookPen,  label: 'Diary',    section: 'diary' },
+  { href: '/gym',      Icon: Dumbbell,     label: 'Gym',      section: 'gym' },
+  { href: '/recovery', Icon: HeartPulse,   label: 'Recovery', section: 'recovery' },
+  { href: '/finance',  Icon: Wallet,       label: 'Finance',  section: 'finance' },
+  { href: '/coach',    Icon: Brain,        label: 'Coach',    section: 'coach' },
 ];
 
 export default function Sidebar() {
   const path = usePathname();
+
+  const activeSection = NAV.find(n => n.href === path)?.section;
+  const activeAccent  = activeSection ? `var(--accent-${activeSection})` : 'var(--success)';
+  const activeGlow    = activeSection ? `var(--accent-${activeSection}-glow)` : 'var(--accent-home-glow)';
 
   return (
     <>
       <style>{`
         .nav {
           position: fixed; z-index: 100;
-          backdrop-filter: blur(22px) saturate(1.2);
-          -webkit-backdrop-filter: blur(22px) saturate(1.2);
-          background: rgba(5,5,6,0.78);
           /* Promote to its own compositor layer — without this, iOS Safari
              tears the bar mid-scroll when combined with backdrop-filter. */
           transform: translateZ(0);
@@ -40,71 +43,79 @@ export default function Sidebar() {
           will-change: transform;
         }
 
-        /* ── Desktop: collapsed rail, expands on hover ─────────────────── */
+        /* ── Desktop: wider rail, expands on hover ─────────────────────── */
         .nav-desktop {
           left: 0; top: 0; bottom: 0;
           width: var(--sidebar-w);
-          border-right: 1px solid rgba(255,255,255,0.05);
+          border-right: 1px solid var(--border-subtle);
+          background: rgba(5,5,6,0.72);
+          backdrop-filter: blur(22px) saturate(1.2);
+          -webkit-backdrop-filter: blur(22px) saturate(1.2);
           display: flex; flex-direction: column;
-          padding: 22px 8px 18px;
+          padding: 24px 10px 20px;
           overflow: hidden;
-          transition: width 220ms cubic-bezier(0.22,1,0.36,1);
+          transition: width var(--dur-base) var(--ease-out);
         }
         .nav-desktop:hover { width: var(--sidebar-w-hover); }
 
         .nav-brand {
           display: flex; align-items: center; gap: 12px;
-          padding: 0 10px; margin-bottom: 32px;
+          padding: 0 12px; margin-bottom: 36px;
           font-family: var(--font-serif); font-style: italic; font-weight: 400;
-          font-size: 20px; color: var(--text-primary);
+          font-size: 22px; color: var(--text-primary);
           white-space: nowrap; overflow: hidden;
         }
         .nav-brand-glyph {
-          color: var(--success); flex-shrink: 0; width: 32px;
+          color: var(--accent-home); flex-shrink: 0; width: 40px; height: 40px;
           display: inline-flex; align-items: center; justify-content: center;
+          border-radius: var(--r-3);
+          background: var(--accent-home-glow);
           line-height: 0;
         }
         .nav-brand-text {
           opacity: 0; transform: translateX(-4px);
-          transition: opacity 200ms ease 60ms, transform 200ms ease 60ms;
+          transition: opacity var(--dur-base) ease 60ms, transform var(--dur-base) ease 60ms;
         }
         .nav-desktop:hover .nav-brand-text { opacity: 1; transform: translateX(0); }
 
-        .nav-list { display: flex; flex-direction: column; gap: 2px; }
+        .nav-list { display: flex; flex-direction: column; gap: 4px; }
         .nav-item {
           position: relative;
           display: flex; align-items: center; gap: 14px;
-          padding: 11px 10px; border-radius: 11px;
+          padding: 12px 12px; border-radius: var(--r-3);
           text-decoration: none; color: var(--text-tertiary);
           white-space: nowrap; overflow: hidden;
-          transition: background 160ms ease, color 160ms ease;
+          transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
         }
-        .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text-secondary); }
+        .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--text-secondary); }
         .nav-item.active { color: var(--text-primary); }
         .nav-item.active::before {
           content: '';
-          position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
-          width: 3px; height: 18px; border-radius: 2px;
-          background: var(--success);
-          box-shadow: 0 0 12px rgba(107,227,164,0.6);
+          position: absolute; left: -10px; top: 8px; bottom: 8px;
+          width: 3px; border-radius: 2px;
+          background: var(--nav-active-color, var(--success));
+          box-shadow: 0 0 14px var(--nav-active-glow, rgba(107,227,164,0.55));
         }
         .nav-glyph {
-          flex-shrink: 0; width: 32px;
+          flex-shrink: 0; width: 40px; height: 40px;
           display: inline-flex; align-items: center; justify-content: center;
+          border-radius: var(--r-3);
           line-height: 0;
+          transition: background var(--dur-fast) var(--ease-out);
         }
         .nav-item.active .nav-glyph {
-          color: var(--success);
-          filter: drop-shadow(0 0 10px rgba(107,227,164,0.5));
+          color: var(--nav-active-color, var(--success));
+          background: var(--nav-active-glow, rgba(107,227,164,0.14));
+          filter: drop-shadow(0 0 10px var(--nav-active-glow, rgba(107,227,164,0.55)));
         }
         .nav-label {
-          font-size: 13px; font-weight: 600; letter-spacing: -0.005em;
+          font-size: var(--text-body); font-weight: 600; letter-spacing: -0.005em;
           opacity: 0; transform: translateX(-4px);
-          transition: opacity 200ms ease 60ms, transform 200ms ease 60ms;
+          transition: opacity var(--dur-base) ease 60ms, transform var(--dur-base) ease 60ms;
         }
         .nav-desktop:hover .nav-label { opacity: 1; transform: translateX(0); }
 
-        /* ── Mobile: bottom tab bar ────────────────────────────────────── */
+        /* ── Mobile: floating pill above the safe-area ─────────────────── */
         .nav-mobile { display: none; }
 
         @media (max-width: 640px) {
@@ -112,48 +123,48 @@ export default function Sidebar() {
 
           .nav-mobile {
             display: flex;
-            left: 0; right: 0; bottom: 0;
-            height: calc(var(--nav-h) + env(safe-area-inset-bottom));
-            padding-bottom: env(safe-area-inset-bottom);
-            border-top: 1px solid rgba(255,255,255,0.06);
-            background: rgba(5,5,6,0.85);
+            left: 12px; right: 12px;
+            bottom: calc(env(safe-area-inset-bottom) + 12px);
+            height: var(--nav-h);
+            border-radius: var(--r-4);
+            background: rgba(12,12,14,0.86);
+            border: 1px solid var(--border-quiet);
+            backdrop-filter: blur(24px) saturate(1.3);
+            -webkit-backdrop-filter: blur(24px) saturate(1.3);
+            box-shadow: var(--elev-2);
+            padding: 6px;
           }
           .nav-mobile-list {
-            display: flex; flex: 1; align-items: stretch;
+            display: flex; flex: 1; align-items: stretch; justify-content: space-between;
           }
           .nav-tab {
             position: relative;
             flex: 1;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            gap: 4px;
+            gap: 3px;
             text-decoration: none;
             color: var(--text-tertiary);
-            transition: color 160ms ease;
-            min-height: var(--tap);
+            border-radius: var(--r-3);
+            transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+            min-height: 44px;
           }
           .nav-tab:active { color: var(--text-secondary); }
-          .nav-tab.active { color: var(--text-primary); }
-          .nav-tab.active .nav-tab-glyph {
-            color: var(--success);
-            filter: drop-shadow(0 0 10px rgba(107,227,164,0.5));
+          .nav-tab.active {
+            color: var(--nav-active-color, var(--success));
+            background: var(--nav-active-glow, rgba(107,227,164,0.14));
           }
-          /* Active indicator pip at the top of the tab */
-          .nav-tab.active::before {
-            content: '';
-            position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-            width: 26px; height: 2px;
-            background: var(--success);
-            border-radius: 0 0 3px 3px;
-            box-shadow: 0 0 10px rgba(107,227,164,0.55);
+          .nav-tab.active .nav-tab-glyph {
+            color: var(--nav-active-color, var(--success));
+            filter: drop-shadow(0 0 10px var(--nav-active-glow, rgba(107,227,164,0.6)));
           }
           .nav-tab-glyph {
             display: inline-flex; align-items: center; justify-content: center;
             line-height: 0;
-            transition: color 160ms ease, filter 160ms ease, transform 160ms ease;
+            transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
           }
-          .nav-tab:active .nav-tab-glyph { transform: scale(0.92); }
+          .nav-tab:active .nav-tab-glyph { transform: scale(0.9); }
           .nav-tab-label {
-            font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+            font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
             text-transform: uppercase;
           }
         }
@@ -166,34 +177,50 @@ export default function Sidebar() {
           <span className="nav-brand-text">Change</span>
         </div>
         <div className="nav-list">
-          {NAV.map(({ href, Icon, label }) => (
-            <Link
-              key={href}
-              href={href}
-              className={`nav-item${path === href ? ' active' : ''}`}
-              aria-current={path === href ? 'page' : undefined}
-            >
-              <span className="nav-glyph"><Icon size={20} strokeWidth={1.75} /></span>
-              <span className="nav-label">{label}</span>
-            </Link>
-          ))}
+          {NAV.map(({ href, Icon, label, section }) => {
+            const isActive = path === href;
+            const styleVars = isActive
+              ? { ['--nav-active-color' as string]: activeAccent, ['--nav-active-glow' as string]: activeGlow }
+              : undefined;
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`nav-item${isActive ? ' active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
+                data-section={section}
+                style={styleVars}
+              >
+                <span className="nav-glyph"><Icon size={20} strokeWidth={1.75} /></span>
+                <span className="nav-label">{label}</span>
+              </Link>
+            );
+          })}
         </div>
       </nav>
 
       {/* Mobile */}
       <nav className="nav nav-mobile" aria-label="Primary">
         <div className="nav-mobile-list">
-          {NAV.map(({ href, Icon, label }) => (
-            <Link
-              key={href}
-              href={href}
-              className={`nav-tab${path === href ? ' active' : ''}`}
-              aria-current={path === href ? 'page' : undefined}
-            >
-              <span className="nav-tab-glyph"><Icon size={22} strokeWidth={1.75} /></span>
-              <span className="nav-tab-label">{label}</span>
-            </Link>
-          ))}
+          {NAV.map(({ href, Icon, label, section }) => {
+            const isActive = path === href;
+            const styleVars = isActive
+              ? { ['--nav-active-color' as string]: activeAccent, ['--nav-active-glow' as string]: activeGlow }
+              : undefined;
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`nav-tab${isActive ? ' active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
+                data-section={section}
+                style={styleVars}
+              >
+                <span className="nav-tab-glyph"><Icon size={22} strokeWidth={1.75} /></span>
+                <span className="nav-tab-label">{label}</span>
+              </Link>
+            );
+          })}
         </div>
       </nav>
     </>

@@ -9,6 +9,7 @@ import ExerciseSparklineGrid from '@/components/gym/ExerciseSparklineGrid';
 import WorkoutAdherenceCard from '@/components/gym/WorkoutAdherenceCard';
 import BodyWeightCard from '@/components/gym/BodyWeightCard';
 import HealthMetricsCard from '@/components/gym/HealthMetricsCard';
+import PageHeader from '@/components/layout/PageHeader';
 
 const REST_PRESETS = [60, 90, 120, 180];
 
@@ -53,7 +54,7 @@ export default function GymPage() {
 
   return (
     <>
-      <h1 className="page-title">Gym</h1>
+      <PageHeader title="Gym" accent="gym" />
       {view === 'home' && (
         <>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>

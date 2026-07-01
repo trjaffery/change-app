@@ -5,6 +5,7 @@ import { useToast } from '@/components/layout/Toast';
 import NotificationPrefsCard from '@/components/settings/NotificationPrefsCard';
 import DiagnosticsPanel from '@/components/settings/DiagnosticsPanel';
 import HealthImportCard from '@/components/settings/HealthImportCard';
+import PageHeader from '@/components/layout/PageHeader';
 
 type State = 'unsupported' | 'needs-install' | 'denied' | 'idle' | 'subscribed';
 
@@ -166,7 +167,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <h1 className="page-title">Settings</h1>
+      <PageHeader title="Settings" accent="neutral" />
 
       <div className="card" style={{ marginBottom: 22 }}>
         <div className="section-title">Notifications</div>

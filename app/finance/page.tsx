@@ -4,6 +4,7 @@ import { usePlaidLink } from 'react-plaid-link';
 import EmptyState from '@/components/layout/EmptyState';
 import { useToast } from '@/components/layout/Toast';
 import ActivityLog from '@/components/finance/ActivityLog';
+import PageHeader from '@/components/layout/PageHeader';
 import {
   Landmark, TrendingUp, Bitcoin, Boxes,
   UtensilsCrossed, ShoppingBasket, ShoppingBag, Plane, Car, Tv,
@@ -882,7 +883,7 @@ export default function FinancePage() {
         .cost-toggle-btn.active { background: rgba(255,255,255,0.1); color: var(--text-primary); }
       `}</style>
 
-      <h1 className="page-title">Finance</h1>
+      <PageHeader title="Finance" accent="finance" />
 
       <div className="finance-tabs">
         {tabs.map(t => (

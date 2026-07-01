@@ -8,6 +8,7 @@ import Momentum from '@/components/recovery/Momentum';
 import RelapseLog from '@/components/recovery/RelapseLog';
 import RelapsePreventionPlan from '@/components/recovery/RelapsePreventionPlan';
 import PlayTheTape from '@/components/recovery/PlayTheTape';
+import PageHeader from '@/components/layout/PageHeader';
 import CrisisMode from '@/components/recovery/CrisisMode';
 
 export default function RecoveryPage() {
@@ -26,7 +27,7 @@ export default function RecoveryPage() {
 
   return (
     <>
-      <h1 className="page-title">Recovery</h1>
+      <PageHeader title="Recovery" accent="recovery" />
 
       <StreakCard refreshKey={streakRefreshKey} />
 
