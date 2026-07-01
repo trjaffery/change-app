@@ -39,6 +39,9 @@
 
 html {
   height: 100%;
+  /* Tell the UA this is a dark surface. Fixes native scrollbars, form controls,
+     and the Windows dark-mode default palette without extra CSS. */
+  color-scheme: dark;
   /* Lock-down some iOS quirks at the root */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
@@ -74,7 +77,8 @@ a, button, [role="button"] {
 :focus-visible { outline: 2px solid rgba(107,227,164,0.5); outline-offset: 2px; border-radius: 2px; }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Ambient background — two drift gradients + grain.
+   Ambient background — two drift gradients + grain. Motion is gated by the
+   global reduced-motion rule further down.
    ────────────────────────────────────────────────────────────────────────── */
 body::before, body::after { content: ''; position: fixed; pointer-events: none; z-index: 0; }
 body::before {
@@ -82,14 +86,16 @@ body::before {
   background: radial-gradient(circle, rgba(224,118,88,0.12), transparent 70%);
   top: 14%; left: 82%; transform: translate(-50%,-50%);
   filter: blur(48px);
-  animation: drift-warm 36s ease-in-out infinite alternate;
 }
 body::after {
   width: 540px; height: 540px;
   background: radial-gradient(circle, rgba(107,227,164,0.06), transparent 70%);
   top: 88%; left: 14%; transform: translate(-50%,-50%);
   filter: blur(48px);
-  animation: drift-cool 42s ease-in-out infinite alternate-reverse;
+}
+@media (prefers-reduced-motion: no-preference) {
+  body::before { animation: drift-warm 36s ease-in-out infinite alternate; }
+  body::after  { animation: drift-cool 42s ease-in-out infinite alternate-reverse; }
 }
 
 @keyframes drift-warm {
@@ -180,9 +186,16 @@ body::after {
   letter-spacing: -0.02em;
   color: var(--text-primary);
   margin-bottom: 22px;
+  /* Even line lengths on the rare two-line title. */
+  text-wrap: balance;
   /* Subtle glow so it sits on the dark backdrop without floating. */
   text-shadow: 0 1px 24px rgba(255,255,255,0.04);
 }
+
+/* Heading rhythm — every h1/h2/h3 gets balanced wrapping; long prose blocks
+   inside cards get widow-friendly wrap. Card-local overrides win. */
+h1, h2, h3 { text-wrap: balance; }
+p, .ai-response, .ai-response p { text-wrap: pretty; }
 
 @media (max-width: 640px) {
   .page-title {
@@ -304,4 +317,18 @@ body::after {
   *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
   *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); border: 2px solid transparent; background-clip: content-box; }
   *::-webkit-scrollbar-track { background: transparent; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Reduced motion — one global nuke rule so we don't have to remember to
+   gate every keyframe in every component. Everything still functions; it
+   just settles instantly.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

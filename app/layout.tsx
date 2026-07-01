@@ -42,7 +42,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
+  // Deliberately no `maximumScale` — locking zoom is an a11y violation.
+  // The 16px input font size in globals.css handles the iOS auto-zoom issue.
   viewportFit: 'cover',
   themeColor: '#050506',
 };
