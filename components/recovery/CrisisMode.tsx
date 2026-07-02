@@ -150,7 +150,7 @@ export default function CrisisMode({
         .cm-back:hover { color: var(--text-secondary); }
         .cm-line {
           margin-left: auto;
-          font-family: var(--font-serif); font-style: italic;
+          font-family: var(--font-sans);
           font-size: 12px; color: var(--text-tertiary);
           text-align: right; line-height: 1.4;
           max-width: 65%;
@@ -246,7 +246,7 @@ export default function CrisisMode({
           border-radius: 14px;
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.06);
-          font-family: var(--font-serif);
+          font-family: var(--font-sans);
           font-style: italic;
           font-size: 16px;
           line-height: 1.6;

@@ -77,8 +77,19 @@ function fill(count: number, goalValue: number): number {
   return Math.min(1, count / goalValue);
 }
 
-export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number }) {
-  const [mode, setMode] = useState<ViewMode>('week');
+export default function HabitCalendar({
+  refreshKey = 0,
+  signature = false,
+  title,
+}: {
+  refreshKey?: number;
+  /** When true, renders as Home's signature 30-day activity grid — no toggle,
+   *  larger cells, cleaner tick marks. */
+  signature?: boolean;
+  /** Overrides the section title. Default: "Habit History". */
+  title?: string;
+}) {
+  const [mode, setMode] = useState<ViewMode>(signature ? 'month' : 'week');
   const [data, setData] = useState<CalendarData | null>(null);
   const today = toISODate(new Date());
   const compact = useIsCompact();
@@ -94,11 +105,15 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
   const { dates } = getDateRange(mode);
   const isMonth = mode === 'month';
 
-  // Month view stays a fixed-cell scrollable grid (30 cells need horizontal space).
-  // Week view flexes — cells grow to fill the card so we use the whole width.
-  const cellSize = compact ? (isMonth ? 18 : 24) : (isMonth ? 22 : 28);
-  const cellGap  = compact ? (isMonth ? 2  : 5)  : (isMonth ? 3  : 6);
-  const labelWidth = compact ? 110 : 150;
+  // Signature mode bumps cell sizes so the grid reads as a chart, not a widget.
+  // Non-signature keeps original sizing for other consumers.
+  const cellSize = signature
+    ? (compact ? 15 : 20)
+    : compact ? (isMonth ? 18 : 24) : (isMonth ? 22 : 28);
+  const cellGap  = signature
+    ? (compact ? 3 : 4)
+    : compact ? (isMonth ? 2 : 5) : (isMonth ? 3 : 6);
+  const labelWidth = signature ? (compact ? 100 : 140) : (compact ? 110 : 150);
   const tailWidth  = compact ? 44 : 56;
 
   if (!data) return <div className="card" style={{ marginBottom: 22, minHeight: 80 }} />;
@@ -187,11 +202,22 @@ export default function HabitCalendar({ refreshKey = 0 }: { refreshKey?: number 
 
       <div className="card cal-card">
         <div className="cal-head">
-          <div className="section-title" style={{ margin: 0 }}>Habit History</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className={`cal-toggle${mode === 'week' ? ' active' : ''}`} onClick={() => setMode('week')}>Week</button>
-            <button className={`cal-toggle${mode === 'month' ? ' active' : ''}`} onClick={() => setMode('month')}>Month</button>
-          </div>
+          <div className="section-title" style={{ margin: 0 }}>{title ?? 'Habit History'}</div>
+          {!signature && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className={`cal-toggle${mode === 'week' ? ' active' : ''}`} onClick={() => setMode('week')}>Week</button>
+              <button className={`cal-toggle${mode === 'month' ? ' active' : ''}`} onClick={() => setMode('month')}>Month</button>
+            </div>
+          )}
+          {signature && (
+            <span style={{
+              fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'var(--text-tertiary)',
+            }}>
+              Last 30 days
+            </span>
+          )}
         </div>
 
         {/* Header row — day-of-week (or day-of-month) labels above each cell. */}

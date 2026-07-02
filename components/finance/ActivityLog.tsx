@@ -64,7 +64,7 @@ export default function ActivityLog({ refreshKey }: { refreshKey?: number }) {
   if (rows.length === 0) return null;
 
   return (
-    <div className="card card-accent-finance" style={{ marginBottom: 16 }}>
+    <div className="card" style={{ marginBottom: 16 }}>
       <div className="section-title">Recent activity</div>
       <style>{`
         .al-row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.04); }

@@ -10,6 +10,15 @@ interface Correlation {
   confidence: 'high' | 'low';
 }
 
+/**
+ * Cross-domain pattern feed. Sourced deterministically from
+ * lib/correlations.ts — no LLM in the loop, so findings are stable across
+ * loads. The 2026-07 overhaul cleaned up the visual language:
+ *   • Numbered list per insight, no coloured tint blocks
+ *   • Bigger typography, real sentences (findings ARE full sentences today,
+ *     the earlier "cryptic" complaint traced to /api/ai/briefing which was
+ *     tuned separately)
+ */
 export default function Insights() {
   const [correlations, setCorrelations] = useState<Correlation[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,93 +39,138 @@ export default function Insights() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
   }, []);
 
   const strong = (correlations ?? []).filter(c => c.strength === 'strong');
-  const headline = strong[0] ?? null;
-  const rest = strong.slice(1);
 
   return (
     <div className="card" style={{ marginBottom: 22 }}>
       <style>{`
-        .ins-sk { background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 100%); background-size: 200% 100%; animation: ins-shimmer 1.6s linear infinite; border-radius: 6px; }
-        @keyframes ins-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
-        .ins-headline {
-          padding: 14px 16px;
-          border-radius: 12px;
-          background: rgba(107,227,164,0.05);
-          border: 1px solid rgba(107,227,164,0.18);
-          border-left: 3px solid var(--success);
-          margin-bottom: 16px;
+        .in-head {
+          display: flex; align-items: baseline; justify-content: space-between;
+          margin-bottom: 4px;
         }
-        .ins-headline-finding {
+        .in-title {
+          font-family: var(--font-sans);
           font-size: 15px; font-weight: 600;
-          color: var(--text-primary); line-height: 1.5;
+          letter-spacing: -0.005em;
+          color: var(--text-primary);
+        }
+        .in-window {
+          font-family: var(--font-mono);
+          font-size: 10px;
+          letter-spacing: 0.08em; text-transform: uppercase;
+          color: var(--text-tertiary);
+        }
+        .in-sub {
+          font-size: 13px;
+          color: var(--text-tertiary);
+          line-height: 1.55;
+          margin-top: 6px;
+          margin-bottom: 18px;
+          max-width: 62ch;
+        }
+
+        .in-list { display: flex; flex-direction: column; gap: 6px; }
+        .in-item {
+          position: relative;
+          display: grid;
+          grid-template-columns: 28px 1fr;
+          gap: 12px;
+          padding: 14px 4px;
+          border-top: 1px solid var(--border-subtle);
+        }
+        .in-item:first-of-type { border-top: none; padding-top: 4px; }
+        .in-num {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          color: var(--text-tertiary);
+          padding-top: 3px;
+          text-align: right;
+        }
+        .in-body { min-width: 0; }
+        .in-finding {
+          font-size: 15px; line-height: 1.5;
+          color: var(--text-primary);
           margin: 0;
+          font-weight: 500;
+          letter-spacing: -0.005em;
         }
-        .ins-headline-action {
-          font-size: 13px; color: var(--success);
-          line-height: 1.5; margin: 8px 0 0;
+        .in-action {
+          font-size: 13px; line-height: 1.55;
+          color: var(--text-secondary);
+          margin: 8px 0 0;
+          display: flex; align-items: baseline; gap: 8px;
         }
-        .ins-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; }
-        .ins-row .dot { flex-shrink: 0; margin-top: 6px; width: 7px; height: 7px; border-radius: 50%; }
-        .ins-row .finding { font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
-        .ins-row .action { font-size: 12px; color: var(--text-tertiary); line-height: 1.5; margin: 4px 0 0; font-style: italic; }
-        .ins-section-label {
-          font-family: var(--font-mono); font-size: 9px; font-weight: 700;
-          letter-spacing: 0.14em; text-transform: uppercase;
-          color: var(--text-tertiary); margin: 14px 0 6px;
+        .in-action-arrow {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          color: var(--success);
+          flex-shrink: 0;
+        }
+
+        .in-empty {
+          font-size: 13px; line-height: 1.6;
+          color: var(--text-tertiary);
+          padding: 8px 0 4px;
+          max-width: 62ch;
+        }
+
+        .in-sk {
+          background: linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 100%);
+          background-size: 200% 100%;
+          animation: in-shimmer 1.6s linear infinite;
+          border-radius: 4px;
+          display: block;
+        }
+        @keyframes in-shimmer {
+          0%   { background-position: 100% 0; }
+          100% { background-position: -100% 0; }
         }
       `}</style>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div className="section-title" style={{ margin: 0 }}>Patterns</div>
-        <span style={{ fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>last 30 days</span>
+      <div className="in-head">
+        <span className="in-title">Patterns</span>
+        <span className="in-window">Last 30 days</span>
       </div>
 
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="in-list" style={{ marginTop: 14 }}>
           {[0, 1, 2].map(i => (
-            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span className="ins-sk" style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 4, flexShrink: 0 }} />
-              <div style={{ flex: 1 }}>
-                <span className="ins-sk" style={{ display: 'block', width: `${80 - i * 12}%`, height: 12, marginBottom: 6 }} />
-                <span className="ins-sk" style={{ display: 'block', width: '40%', height: 8 }} />
+            <div key={i} className="in-item">
+              <span className="in-num">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <span className="in-sk" style={{ height: 14, width: `${80 - i * 10}%`, marginBottom: 8 }} />
+                <span className="in-sk" style={{ height: 12, width: '48%' }} />
               </div>
             </div>
           ))}
         </div>
       ) : errorMsg ? (
-        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic', wordBreak: 'break-word' }}>Error: {errorMsg}</p>
-      ) : !headline ? (
-        <p style={{ fontSize: 13, color: 'var(--text-tertiary)', margin: 0, lineHeight: 1.6 }}>
-          No strong patterns surfaced in the last 30 days. Cross-domain signals need a mix of habits, workouts, and recovery logs to show up — recovery-only data shows up in the Patterns card on your recovery page instead.
+        <p className="in-empty">Couldn&apos;t load insights: {errorMsg}</p>
+      ) : strong.length === 0 ? (
+        <p className="in-empty">
+          Nothing strong to surface yet. Cross-domain patterns need at least a few weeks of overlapping habit, workout, and recovery logs before signal separates from noise.
         </p>
       ) : (
-        <>
-          <div className="ins-headline">
-            <p className="ins-headline-finding">{headline.finding}</p>
-            {headline.action && <p className="ins-headline-action">→ {headline.action}</p>}
-          </div>
-
-          {rest.length > 0 && (
-            <>
-              <div className="ins-section-label">Also showing up</div>
-              <div>
-                {rest.map(c => (
-                  <div key={c.id} className="ins-row">
-                    <span className="dot" style={{ background: 'var(--success)' }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p className="finding">{c.finding}</p>
-                      {c.action && <p className="action">→ {c.action}</p>}
-                    </div>
-                  </div>
-                ))}
+        <div className="in-list">
+          {strong.map((c, i) => (
+            <div key={c.id} className="in-item">
+              <span className="in-num">{String(i + 1).padStart(2, '0')}</span>
+              <div className="in-body">
+                <p className="in-finding">{c.finding}</p>
+                {c.action && (
+                  <p className="in-action">
+                    <span className="in-action-arrow">→</span>
+                    <span>{c.action}</span>
+                  </p>
+                )}
               </div>
-            </>
-          )}
-        </>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

@@ -80,6 +80,19 @@ export default function DailyTasks({ onChange }: { onChange?: (done: number, tot
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
+  // The Home command bar's quick-add button dispatches this event — scroll the
+  // add row into view and focus its input.
+  useEffect(() => {
+    function onFocusTaskInput() {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    window.addEventListener('focus-task-input', onFocusTaskInput);
+    return () => window.removeEventListener('focus-task-input', onFocusTaskInput);
+  }, []);
+
   function notify(list: Task[]) {
     onChangeRef.current?.(list.filter(t => t.done).length, list.length);
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('tasks-changed'));
@@ -359,8 +372,9 @@ export default function DailyTasks({ onChange }: { onChange?: (done: number, tot
           margin-bottom: 4px;
         }
         .dt-title {
-          font-family: var(--font-serif); font-style: italic;
-          font-size: 22px; letter-spacing: -0.01em;
+          font-family: var(--font-sans);
+          font-size: 15px; font-weight: 600;
+          letter-spacing: -0.005em;
           color: var(--text-primary);
         }
         .dt-count {
@@ -435,7 +449,7 @@ export default function DailyTasks({ onChange }: { onChange?: (done: number, tot
         .dt-subdel:hover { color: var(--danger); opacity: 1; }
 
         .dt-empty {
-          font-family: var(--font-serif); font-style: italic;
+          font-family: var(--font-sans);
           font-size: 15px; line-height: 1.5;
           color: var(--text-tertiary);
           padding: 18px 4px 6px;

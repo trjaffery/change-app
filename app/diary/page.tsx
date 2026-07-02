@@ -223,14 +223,14 @@ export default function DiaryPage() {
           border: none;
           outline: none;
           color: var(--text-primary);
-          font-family: var(--font-serif);
+          font-family: var(--font-sans);
           font-size: 17px;
           line-height: 1.6;
           padding: 18px 4px;
           resize: none;
           -webkit-tap-highlight-color: transparent;
         }
-        .dr-textarea::placeholder { color: var(--text-tertiary); font-style: italic; }
+        .dr-textarea::placeholder { color: var(--text-tertiary); }
         .dr-status {
           display: flex; align-items: center; justify-content: space-between;
           font-family: var(--font-mono); font-size: 10px;
@@ -353,8 +353,7 @@ export default function DiaryPage() {
             background: 'rgba(120,180,255,0.04)',
             borderLeft: '2px solid #78B4FF',
             borderRadius: 10,
-            fontFamily: 'var(--font-serif)',
-            fontStyle: 'italic',
+            fontFamily: 'var(--font-sans)',
             fontSize: 14,
             lineHeight: 1.5,
             color: 'var(--text-secondary)',

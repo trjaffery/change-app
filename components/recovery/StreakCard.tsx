@@ -108,14 +108,14 @@ export default function StreakCard({
         .milestone-badge { padding:5px 12px; border-radius:999px; border:1px solid rgba(255,255,255,0.08); font-size:11px; font-family:var(--font-mono); font-weight:700; color:var(--text-tertiary); opacity:0.35; transition:all 0.3s; }
         .milestone-badge.earned { opacity:1; color:var(--success); border-color:rgba(107,227,164,0.35); box-shadow:0 0 12px rgba(107,227,164,0.15); }
         .streak-num {
-          font-family: var(--font-serif);
-          font-style: italic; font-weight: 400;
-          font-size: clamp(96px, 18vw, 132px);
-          line-height: 0.92;
-          letter-spacing: -0.03em;
+          font-family: var(--font-mono);
+          font-weight: 600;
+          font-size: clamp(72px, 14vw, 108px);
+          line-height: 1;
+          letter-spacing: -0.04em;
           color: var(--text-primary);
-          margin-bottom: 4px;
-          text-shadow: 0 1px 36px rgba(107,227,164,0.18);
+          margin-bottom: 6px;
+          font-variant-numeric: tabular-nums;
         }
         .sc-momentum {
           margin-top: 24px;

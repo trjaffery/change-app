@@ -31,6 +31,8 @@ const PRESET_COLORS = [
 ];
 
 const DAYS_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const SWIPE_START_PX = 10;
+const REORDER_CANCEL_PX = 18;
 
 const PERIOD_LABEL: Record<string, string> = { day: 'day', week: 'week', month: 'month' };
 
@@ -38,6 +40,16 @@ function periodLabel(habit: Habit): string {
   if (habit.goal_period === 'day') return 'today';
   if (habit.goal_period === 'week') return 'this week';
   return 'this month';
+}
+
+function completionUnits(list: Habit[]): { done: number; total: number } {
+  return list.reduce(
+    (acc, habit) => ({
+      done: acc.done + Math.min(Math.max(habit.period_done, 0), Math.max(habit.goal_value, 0)),
+      total: acc.total + Math.max(habit.goal_value, 0),
+    }),
+    { done: 0, total: 0 },
+  );
 }
 
 export default function HabitList({
@@ -121,7 +133,10 @@ export default function HabitList({
       const res = await fetch(`/api/habits?date=${selectedDate}`);
       const data: Habit[] = await res.json();
       setHabits(data);
-      if (isToday) onCompletionChangeRef.current?.(data.filter(h => h.is_complete).length, data.length);
+      if (isToday) {
+        const progress = completionUnits(data);
+        onCompletionChangeRef.current?.(progress.done, progress.total);
+      }
     } catch {}
   }, [selectedDate, isToday]);
 
@@ -151,7 +166,10 @@ export default function HabitList({
       return { ...h, period_done: newDone, is_complete: newDone >= h.goal_value };
     });
     setHabits(next);
-    if (isToday) onCompletionChangeRef.current?.(next.filter(h => h.is_complete).length, next.length);
+    if (isToday) {
+      const progress = completionUnits(next);
+      onCompletionChangeRef.current?.(progress.done, progress.total);
+    }
   }
 
   async function increment(habit: Habit) {
@@ -362,12 +380,12 @@ export default function HabitList({
     const dy = e.clientY - g.startY;
 
     if (g.state === 'pending') {
-      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+      if (Math.abs(dx) > SWIPE_START_PX && Math.abs(dx) > Math.abs(dy) * 1.25) {
         if (g.longPressTimer) { clearTimeout(g.longPressTimer); g.longPressTimer = null; }
         g.state = 'swiping';
         const el = rowRefs.current.get(g.id);
         if (el) { el.style.transition = 'none'; el.setPointerCapture(e.pointerId); }
-      } else if (Math.abs(dy) > 8) {
+      } else if (Math.abs(dy) > REORDER_CANCEL_PX || Math.abs(dx) > REORDER_CANCEL_PX) {
         if (g.longPressTimer) { clearTimeout(g.longPressTimer); g.longPressTimer = null; }
         g.state = 'cancelled';
       } else {
@@ -463,7 +481,6 @@ export default function HabitList({
     }
     document.addEventListener('pointerdown', onDocPointer);
     return () => document.removeEventListener('pointerdown', onDocPointer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealedId]);
 
 
@@ -472,6 +489,8 @@ export default function HabitList({
       <style>{`
         .habit-row-wrap { position: relative; border-radius: 12px; overflow: hidden; touch-action: pan-y; }
         .habit-row-wrap.dragging { overflow: visible; touch-action: none; }
+        .habit-row-wrap.revealed .habit-actions { z-index: 3; }
+        .habit-row-wrap.revealed .habit-row { z-index: 2; }
         .habit-row { position: relative; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 12px; background-color: rgba(20,20,22,1); border: 1px solid rgba(255,255,255,0.05); transition: transform 220ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms ease, background 0.2s, border-color 0.2s; will-change: transform; user-select: none; -webkit-user-select: none; cursor: grab; touch-action: pan-y; }
         .habit-row:active { cursor: grabbing; }
         .habit-row.done { background-color: rgba(28,28,30,1); border-color: rgba(255,255,255,0.09); }
@@ -826,7 +845,7 @@ export default function HabitList({
             return (
               <Fragment key={habit.id}>
                 {indicatorBefore && <div className="habit-drop-indicator" />}
-              <div className={`habit-row-wrap${isDraggedRow ? ' dragging' : ''}`} data-habit-wrap={habit.id}>
+              <div className={`habit-row-wrap${isDraggedRow ? ' dragging' : ''}${revealedId === habit.id ? ' revealed' : ''}`} data-habit-wrap={habit.id}>
                 {!isDraggedRow && (
                   <div className="habit-actions">
                     <button data-no-swipe className="habit-action-btn edit" onClick={() => startEdit(habit)} aria-label="Edit habit">

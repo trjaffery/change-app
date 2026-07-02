@@ -46,7 +46,7 @@ export default function HealthMetricsCard() {
 
   if (rows.length === 0) {
     return (
-      <div className="card card-accent-gym" style={{ marginBottom: 22 }}>
+      <div className="card" style={{ marginBottom: 22 }}>
         <div className="section-title">Health · last {WINDOW_DAYS} days</div>
         <div className="empty-state" style={{ textAlign: 'left', fontSize: 12 }}>
           No data yet. Set up the iOS Shortcut in Settings → Health import to start syncing steps and sleep from your iPhone.
@@ -68,7 +68,7 @@ export default function HealthMetricsCard() {
   const sleepAvg = avg(sleepSeries);
 
   return (
-    <div className="card card-accent-gym" style={{ marginBottom: 22 }}>
+    <div className="card" style={{ marginBottom: 22 }}>
       <div className="section-title">Health · last {WINDOW_DAYS} days</div>
 
       <MetricRow

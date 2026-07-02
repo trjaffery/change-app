@@ -12,7 +12,7 @@ const MOOD_TONES = ['#FF6B6B', '#E07658', '#F2C063', '#9BD56F', '#6BE3A4'];
  * mood picker so mood can be set without leaving Home. The mood buttons stop
  * propagation so tapping them doesn't also follow the outer Link.
  */
-export default function DiaryCard() {
+export default function DiaryCard({ hideMood = false }: { hideMood?: boolean } = {}) {
   const today = getActiveDateString();
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,16 +60,12 @@ export default function DiaryCard() {
         .dc-card {
           padding: 16px 18px;
           border-radius: 16px;
-          border: 1px solid rgba(255,255,255,0.05);
-          background:
-            radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.02) 45%, rgba(255,255,255,0.025) 100%),
-            rgba(255,255,255,0.04);
-          backdrop-filter: blur(28px) saturate(1.25);
-          -webkit-backdrop-filter: blur(28px) saturate(1.25);
-          box-shadow: 0 10px 36px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.045);
-          transition: border-color 200ms ease;
+          border: 1px solid var(--border-subtle);
+          background: var(--surface-1);
+          box-shadow: 0 1px 0 rgba(0,0,0,0.4);
+          transition: border-color 160ms ease;
         }
-        .dc-card:hover { border-color: rgba(255,255,255,0.1); }
+        .dc-card:hover { border-color: var(--border-quiet); }
         .dc-link {
           display: block; text-decoration: none; color: inherit;
           padding-bottom: 12px;
@@ -80,7 +76,7 @@ export default function DiaryCard() {
           color: var(--text-tertiary); letter-spacing: 0.18em; text-transform: uppercase;
         }
         .dc-preview {
-          font-family: var(--font-serif); font-style: italic;
+          font-family: var(--font-sans);
           font-size: 15px; line-height: 1.45;
           color: var(--text-secondary);
           display: -webkit-box;
@@ -137,25 +133,27 @@ export default function DiaryCard() {
             </div>
           )}
         </Link>
-        <div className="dc-mood-row">
-          <span className="dc-mood-label">Mood</span>
-          {MOOD_TONES.map((tone, i) => {
-            const value = i + 1;
-            const on = currentMood === value;
-            return (
-              <button
-                key={value}
-                type="button"
-                className={`dc-mood-pill${on ? ' on' : ''}`}
-                style={{ ['--mood-tone' as string]: tone }}
-                onClick={() => setMood(value)}
-                disabled={savingMood !== null}
-                aria-label={`Set mood ${value}`}
-                aria-pressed={on}
-              />
-            );
-          })}
-        </div>
+        {!hideMood && (
+          <div className="dc-mood-row">
+            <span className="dc-mood-label">Mood</span>
+            {MOOD_TONES.map((tone, i) => {
+              const value = i + 1;
+              const on = currentMood === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  className={`dc-mood-pill${on ? ' on' : ''}`}
+                  style={{ ['--mood-tone' as string]: tone }}
+                  onClick={() => setMood(value)}
+                  disabled={savingMood !== null}
+                  aria-label={`Set mood ${value}`}
+                  aria-pressed={on}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

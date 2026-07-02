@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Hanken_Grotesk, IBM_Plex_Mono, Instrument_Serif } from 'next/font/google';
+import { Hanken_Grotesk, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 import Sidebar from '@/components/layout/Sidebar';
 import SettingsButton from '@/components/layout/SettingsButton';
@@ -19,14 +19,6 @@ const plex = IBM_Plex_Mono({
   display: 'swap',
   weight: ['400', '500', '600', '700'],
   variable: '--font-mono',
-});
-
-const instrument = Instrument_Serif({
-  subsets: ['latin'],
-  display: 'swap',
-  weight: '400',
-  style: ['normal', 'italic'],
-  variable: '--font-serif',
 });
 
 export const metadata: Metadata = {
@@ -50,11 +42,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${hanken.variable} ${plex.variable} ${instrument.variable}`}>
+    <html lang="en" className={`${hanken.variable} ${plex.variable}`}>
       <body suppressHydrationWarning>
         <ToastProvider>
           <ServiceWorkerRegister />
-          <div className="grain" aria-hidden />
           <Sidebar />
           <SettingsButton />
           <main className="main-content">

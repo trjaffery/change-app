@@ -2,26 +2,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { getActiveDateString } from '@/lib/dates';
 
-const CIRC = 2 * Math.PI * 52;
-
 interface Props { done: number; total: number }
 interface BriefingPayload { line?: string; skip?: boolean; error?: string }
 
-// Day phases keyed to the app's 6 AM day boundary.
-// Each entry: [startHour, label, color]
-type Phase = { label: string; start: number; end: number; color: string };
-const PHASES: Phase[] = [
-  { label: 'MORNING',   start: 6,  end: 12, color: '#F2C063' },
-  { label: 'MIDDAY',    start: 12, end: 17, color: '#6BE3A4' },
-  { label: 'AFTERNOON', start: 17, end: 21, color: '#78B4FF' },
-  // Wraps midnight — handled below as "hour >= 21 OR hour < 6".
-  { label: 'EVENING',   start: 21, end: 30, color: '#B07FE8' },
-];
-
-function currentPhase(d: Date): Phase {
-  const h = d.getHours();
-  const normalized = h < 6 ? h + 24 : h; // map 0–5 onto 24–29 so EVENING (21→30) wraps cleanly
-  return PHASES.find(p => normalized >= p.start && normalized < p.end) ?? PHASES[0];
+// The active window used to compute pace: 6 AM → midnight the next 6 AM.
+// Anchors to the same "active date" boundary used across the app.
+function activeWindow(now: Date): { start: Date; end: Date; pct: number } {
+  const start = new Date(now);
+  if (start.getHours() < 6) start.setDate(start.getDate() - 1);
+  start.setHours(6, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  const pct = Math.max(0, Math.min(1, (now.getTime() - start.getTime()) / (end.getTime() - start.getTime())));
+  return { start, end, pct };
 }
 
 function fmtRemaining(ms: number): string {
@@ -32,18 +25,20 @@ function fmtRemaining(ms: number): string {
   return `${m}m`;
 }
 
-function fmtClock(d: Date): string {
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-}
-
+/**
+ * Habit summary card. Replaced the animated ring in the 2026-07 overhaul.
+ *
+ * The old ring showed done/total as a filled arc — useless when the user's
+ * habits skew end-of-day (salah, water), because the arc stayed empty until
+ * night. This surface shows the same numbers but frames them against the
+ * day's pace, so "on track" / "behind" is legible any time.
+ *
+ * If a briefing line is available for today, it renders below as a quiet
+ * mono-cased quote so the AI daily setup still has a home.
+ */
 export default function CompletionRing({ done, total }: Props) {
   const pct = total > 0 ? done / total : 0;
-  const offset = CIRC * (1 - pct);
   const allDone = total > 0 && done === total;
-  const stroke = allDone ? '#6BE3A4' : pct > 0 ? '#F2C063' : 'rgba(255,255,255,0.08)';
-
-  // Phase 2 #6: celebration moment when the user crosses 100% for the first time
-  // today. Once per active day (6 AM boundary), keyed in localStorage.
   const [celebrating, setCelebrating] = useState(false);
   const prevAllDone = useRef(false);
   useEffect(() => {
@@ -52,14 +47,13 @@ export default function CompletionRing({ done, total }: Props) {
       if (typeof window !== 'undefined' && !localStorage.getItem(key)) {
         localStorage.setItem(key, '1');
         setCelebrating(true);
-        const t = setTimeout(() => setCelebrating(false), 4200);
+        const t = setTimeout(() => setCelebrating(false), 3400);
         return () => clearTimeout(t);
       }
     }
     prevAllDone.current = allDone;
   }, [allDone]);
 
-  // Live clock — tick every 30s. No need to be more precise than that for a phase chip.
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());
@@ -67,11 +61,9 @@ export default function CompletionRing({ done, total }: Props) {
     return () => clearInterval(id);
   }, []);
 
-  // Daily briefing — one AI-generated setup line, cached per active day.
-  // Rendered below the hero as an italic quote when present.
   const [briefing, setBriefing] = useState<string | null>(null);
   useEffect(() => {
-    const cacheKey = `briefing_${getActiveDateString()}`;
+    const cacheKey = `briefing_v2_${getActiveDateString()}`;
     const cached = typeof window !== 'undefined' ? localStorage.getItem(cacheKey) : null;
     if (cached === '__skip__') return;
     if (cached) { setBriefing(cached); return; }
@@ -90,115 +82,204 @@ export default function CompletionRing({ done, total }: Props) {
           localStorage.setItem(cacheKey, data.line);
           setBriefing(data.line);
         }
-      } catch { /* silent — briefing is optional */ }
+      } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // Phase chip + remaining (only render after hydration so SSR/CSR match).
-  let phaseLabel = '', phaseColor = '#888', clockTxt = '', remainingTxt = '';
+  // Pace comparison: expected done at this point in the day = day% × total.
+  // Delta = done - expected. Positive = ahead. Negative = behind.
+  let pacePhrase = 'no habits set';
+  let paceTone: 'success' | 'warning' | 'danger' | 'neutral' = 'neutral';
+  let dayPct = 0;
+  let remainingTxt = '';
   if (now) {
-    const p = currentPhase(now);
-    phaseLabel = p.label;
-    phaseColor = p.color;
-    clockTxt = fmtClock(now);
-    const endHour = p.end > 24 ? p.end - 24 : p.end;
-    const endDate = new Date(now);
-    if (p.end > 24 && now.getHours() < 6) {
-      // Already past midnight inside EVENING — end is today at 6 AM
-      endDate.setHours(6, 0, 0, 0);
-    } else if (p.end > 24) {
-      // Late evening before midnight — end is tomorrow at 6 AM
-      endDate.setDate(endDate.getDate() + 1);
-      endDate.setHours(6, 0, 0, 0);
-    } else {
-      endDate.setHours(endHour, 0, 0, 0);
+    const win = activeWindow(now);
+    dayPct = win.pct;
+    remainingTxt = fmtRemaining(win.end.getTime() - now.getTime());
+    if (total > 0) {
+      const expected = dayPct * total;
+      const delta = done - expected;
+      if (allDone) {
+        pacePhrase = 'all done';
+        paceTone = 'success';
+      } else if (delta >= 0.5) {
+        pacePhrase = 'ahead';
+        paceTone = 'success';
+      } else if (delta > -1) {
+        pacePhrase = 'on track';
+        paceTone = 'success';
+      } else if (delta > -2) {
+        pacePhrase = 'a bit behind';
+        paceTone = 'warning';
+      } else {
+        pacePhrase = 'behind';
+        paceTone = 'danger';
+      }
     }
-    remainingTxt = fmtRemaining(endDate.getTime() - now.getTime()) + ' left';
   }
+
+  const toneColor =
+    paceTone === 'success' ? 'var(--success)'
+    : paceTone === 'warning' ? 'var(--warning)'
+    : paceTone === 'danger' ? 'var(--danger)'
+    : 'var(--text-tertiary)';
 
   return (
     <div className="card card-raised card-accent-home" style={{ marginBottom: 22 }}>
       <style>{`
-        @keyframes ring-pulse {
-          0%, 100% { transform: scale(1); }
-          22%      { transform: scale(1.06); }
-          55%      { transform: scale(0.98); }
+        .cr-grid {
+          display: grid;
+          grid-template-columns: auto 1fr;
+          gap: 22px 24px;
+          align-items: center;
         }
-        @keyframes ring-glow {
-          0%, 100% { filter: drop-shadow(0 0 0 rgba(107,227,164,0)); }
-          50%      { filter: drop-shadow(0 0 24px rgba(107,227,164,0.55)); }
+        .cr-number {
+          font-family: var(--font-mono);
+          font-size: 52px;
+          font-weight: 600;
+          letter-spacing: -0.04em;
+          line-height: 1;
+          color: var(--text-primary);
+          font-variant-numeric: tabular-nums;
         }
-        .ring-celebrate { animation: ring-pulse 1.6s ease-in-out 2, ring-glow 1.6s ease-in-out 2; }
-        @keyframes cel-fade { 0% { opacity: 0; transform: translateY(4px); } 18% { opacity: 1; transform: translateY(0); } 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-2px); } }
-        .ring-cel-line { animation: cel-fade 4s ease-in-out forwards; color: var(--success); font-family: var(--font-serif); font-style: italic; font-size: 13px; }
+        .cr-number .cr-slash {
+          color: var(--text-tertiary);
+          margin: 0 4px;
+          font-weight: 400;
+        }
+        .cr-number .cr-total {
+          color: var(--text-tertiary);
+          font-weight: 400;
+        }
+        .cr-label {
+          font-family: var(--font-mono);
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--text-tertiary);
+          margin-top: 8px;
+        }
+        .cr-right { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+        .cr-pace {
+          display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+        }
+        .cr-pace-word {
+          font-size: 20px;
+          font-weight: 600;
+          letter-spacing: -0.015em;
+          color: var(--tone);
+        }
+        .cr-pace-time {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          color: var(--text-tertiary);
+          letter-spacing: 0.04em;
+        }
+        .cr-bar {
+          position: relative;
+          height: 6px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.05);
+          overflow: hidden;
+        }
+        .cr-bar-fill {
+          height: 100%;
+          background: var(--tone);
+          border-radius: inherit;
+          transition: width 500ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .cr-bar-marker {
+          position: absolute; top: -3px; bottom: -3px;
+          width: 2px;
+          background: rgba(255,255,255,0.45);
+          border-radius: 1px;
+          transition: left 500ms cubic-bezier(0.22,1,0.36,1);
+        }
+        .cr-legend {
+          display: flex; align-items: center; gap: 12px;
+          font-family: var(--font-mono); font-size: 10px;
+          color: var(--text-tertiary); letter-spacing: 0.04em;
+        }
+        .cr-legend-dot {
+          display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+          margin-right: 5px; vertical-align: middle;
+        }
+        .cr-briefing {
+          margin-top: 20px; padding-top: 16px;
+          border-top: 1px solid var(--border-subtle);
+          font-size: 13px;
+          line-height: 1.5;
+          color: var(--text-secondary);
+        }
+        .cr-celebrate {
+          margin-top: 12px;
+          font-size: 12px;
+          color: var(--success);
+          animation: cr-fade 3s ease-in-out forwards;
+        }
+        @keyframes cr-fade {
+          0%   { opacity: 0; transform: translateY(2px); }
+          15%  { opacity: 1; transform: translateY(0); }
+          85%  { opacity: 1; }
+          100% { opacity: 0; }
+        }
+        @media (max-width: 480px) {
+          .cr-grid { grid-template-columns: 1fr; gap: 18px; }
+          .cr-number { font-size: 44px; }
+        }
       `}</style>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, flexWrap: 'wrap' }}>
-        <div className={celebrating ? 'ring-celebrate' : ''} style={{ width: 160, height: 160, position: 'relative', flexShrink: 0 }}>
-          <svg viewBox="0 0 120 120" fill="none" style={{ width: '100%', height: '100%' }}>
-            <defs>
-              <filter id="ring-glow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="2.5" result="blur"/>
-                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-            </defs>
-            <circle cx="60" cy="60" r="52" stroke="rgba(255,255,255,0.06)" strokeWidth="8"/>
-            <circle cx="60" cy="60" r="52" fill="none"
-              stroke={stroke} strokeWidth="8" strokeLinecap="round"
-              strokeDasharray={CIRC} strokeDashoffset={offset}
-              transform="rotate(-90 60 60)"
-              filter={pct > 0 ? 'url(#ring-glow)' : undefined}
-              style={{ transition: 'stroke-dashoffset 0.6s cubic-bezier(0.22,1,0.36,1), stroke 0.4s' }}
-            />
-          </svg>
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 38, fontWeight: 800, letterSpacing: '-0.04em', lineHeight: 1 }}>{done}</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginTop: 4 }}>of {total}</div>
+
+      <div className="cr-grid" style={{ ['--tone' as string]: toneColor }}>
+        <div>
+          <div className="cr-number">
+            {done}
+            <span className="cr-slash">/</span>
+            <span className="cr-total">{total || 0}</span>
           </div>
+          <div className="cr-label">Habits today</div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 140 }}>
-          {now && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', padding: '3px 8px', borderRadius: 5, color: phaseColor, background: `${phaseColor}1A`, border: `1px solid ${phaseColor}44` }}>
-                {phaseLabel}
-              </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-tertiary)' }}>{clockTxt}</span>
-            </div>
-          )}
-          <div style={{ fontSize: 15, fontWeight: 700 }}>
-            {total === 0
-              ? 'Add habits to track'
-              : allDone
-              ? 'All done today.'
-              : done === 0
-              ? 'Nothing done yet.'
-              : `${total - done} left today`}
+
+        <div className="cr-right">
+          <div className="cr-pace">
+            <span className="cr-pace-word">
+              {total === 0 ? 'Add habits to track' : pacePhrase}
+            </span>
+            {now && total > 0 && (
+              <span className="cr-pace-time">{remainingTxt} left</span>
+            )}
           </div>
-          {celebrating && (
-            <div className="ring-cel-line">Alhamdulillah — every one of them, today.</div>
-          )}
+
           {total > 0 && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>
-              {Math.round(pct * 100)}% complete
+            <div className="cr-bar">
+              <div className="cr-bar-fill" style={{ width: `${Math.round(pct * 100)}%` }} />
+              {!allDone && (
+                <div
+                  className="cr-bar-marker"
+                  style={{ left: `${Math.max(0, Math.min(100, Math.round(dayPct * 100)))}%` }}
+                  aria-label="day progress"
+                  title="Where you'd be if habits were evenly paced"
+                />
+              )}
             </div>
           )}
-          {now && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)' }}>
-              {remainingTxt} in {phaseLabel.toLowerCase()}
+
+          {total > 0 && (
+            <div className="cr-legend">
+              <span><span className="cr-legend-dot" style={{ background: toneColor }} />{Math.round(pct * 100)}% done</span>
+              <span><span className="cr-legend-dot" style={{ background: 'rgba(255,255,255,0.45)' }} />{Math.round(dayPct * 100)}% of day</span>
             </div>
           )}
         </div>
       </div>
+
+      {celebrating && (
+        <div className="cr-celebrate">All done today. Alhamdulillah.</div>
+      )}
+
       {briefing && (
-        <div style={{
-          marginTop: 18, paddingTop: 14,
-          borderTop: '1px solid rgba(255,255,255,0.06)',
-          fontFamily: 'var(--font-serif)', fontStyle: 'italic',
-          fontSize: 14, lineHeight: 1.5, color: 'var(--text-secondary)',
-          textAlign: 'center',
-        }}>
-          {briefing}
-        </div>
+        <div className="cr-briefing">{briefing}</div>
       )}
     </div>
   );

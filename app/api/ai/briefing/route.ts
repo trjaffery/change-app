@@ -118,9 +118,23 @@ export async function POST() {
 
     const prompt = ctx.join('\n') + `
 
-Write ONE sentence (≤25 words) that names a specific thing the user can do today, grounded in the data above. If the only signal is a streak milestone, you may acknowledge it briefly. Output compact JSON: {"line":"…"}`;
+Write 1–2 short, plain-English sentences (35–50 words total) that a friend
+would actually say out loud. Ground it in the specific signals above. Say the
+what and the why, not a compressed telegram. Example of what to AVOID:
+"Target evening for your 3 habits; Wednesday urges peak then." — that's
+cryptic and wire-service style. Example of what to WRITE: "Wednesday evenings
+are when your urges tend to spike, so plan the 6–9pm window before it
+arrives. You've still got 3 habits open for today."
 
-    const raw = await callAI(prompt, 'You are a coach writing a one-line setup for today. Be specific, not motivational. Cite the actual signal (day, peak window, workout, streak day). No platitudes. Output compact JSON only.', 200);
+If the only signal is a streak milestone, one warm sentence is fine.
+
+Output compact JSON: {"line":"…"}`;
+
+    const raw = await callAI(
+      prompt,
+      'You are a thoughtful coach writing a short daily setup for the user. Write real sentences, not headline fragments. Be specific and warm, not motivational fluff. No emojis, no exclamation marks. Output JSON only.',
+      400,
+    );
     const parsed = parseJSON<BriefingResponse>(raw);
     if (!parsed.line || parsed.line.trim().length < 6) return NextResponse.json({ skip: true } satisfies SkipResponse);
     return NextResponse.json({ line: parsed.line.trim() } satisfies BriefingResponse);

@@ -1,30 +1,34 @@
 @import "tailwindcss";
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Design tokens — editorial monospace dashboard.
-   Hanken Grotesk (body), IBM Plex Mono (numerics), Instrument Serif (titles).
+   Design tokens — industrial, calm, high-signal.
+   Hanken Grotesk for prose, IBM Plex Mono for numerics + labels.
+   No serif hero typography (dropped in the 2026-07 overhaul).
    ────────────────────────────────────────────────────────────────────────── */
 :root {
   /* Font variables come from next/font (see app/layout.tsx). The fallbacks
      are good enough to look fine before the web fonts load. */
   --font-sans: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   --font-mono: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
-  --font-serif: var(--font-serif, "Iowan Old Style", "Apple Garamond", Georgia, serif);
+  /* Kept as a safety alias — any lingering inline `fontFamily: var(--font-serif)`
+     in components quietly renders as sans until swept. Remove once no
+     component references it. */
+  --font-serif: var(--font-sans);
 
-  /* Surface */
-  --bg-base: #050506;
-  --bg-deep: #030304;
-  --surface-1: rgba(255,255,255,0.04);  /* baseline card */
-  --surface-2: rgba(255,255,255,0.06);  /* elevated card */
-  --surface-3: rgba(20,20,22,0.94);     /* modal/sheet — opaque enough to read */
+  /* Surface — flat, no glass. Layered by opacity, not blur. */
+  --bg-base: #08080A;
+  --bg-deep: #050506;
+  --surface-1: #101013;  /* baseline card */
+  --surface-2: #16161A;  /* elevated card */
+  --surface-3: #1B1B20;  /* modal / sheet */
   --border-subtle:    rgba(255,255,255,0.05);
   --border-quiet:     rgba(255,255,255,0.08);
   --border-strong:    rgba(255,255,255,0.14);
 
   /* Text */
-  --text-primary: #FAFAFA;
-  --text-secondary: #B8B6B0;
-  --text-tertiary: #76746E;
+  --text-primary: #F5F5F5;
+  --text-secondary: #A8A8A8;
+  --text-tertiary: #6E6E6E;
 
   /* Semantic */
   --success: #6BE3A4;
@@ -33,22 +37,24 @@
   --info:    #78B4FF;
 
   /* ── Section identity accents ────────────────────────────────────────────
-     Each app section (Home, Diary, Gym, Recovery, Finance, Coach) has its
-     own accent so navigation itself reads as a color legend, and each
-     page's primary card can wear a subtle tinted border. */
-  --accent-home:      #6BE3A4;  /* green — the calm baseline */
-  --accent-diary:     #F2C063;  /* warm amber — journaling, mood */
-  --accent-gym:       #78B4FF;  /* cool blue — physical, athletic */
-  --accent-recovery:  #FF8FB3;  /* rose — care, protection */
-  --accent-finance:   #4FD1C5;  /* teal — cashflow, clarity */
-  --accent-coach:     #B08FFF;  /* violet — thought, insight */
+     Per the 2026-07 overhaul: accents appear ONLY as a thin left stripe on
+     each page's hero card. No page-tinted backgrounds, no accented section
+     titles, no glow. Everything else is neutral. */
+  --accent-home:      #6BE3A4;  /* green */
+  --accent-diary:     #B08FFF;  /* violet */
+  --accent-gym:       #F2C063;  /* amber */
+  --accent-recovery:  #FF6B6B;  /* red */
+  --accent-finance:   #78B4FF;  /* blue */
+  --accent-coach:     #B08FFF;  /* violet — same as diary since coach is reflective */
 
-  --accent-home-glow:     rgba(107,227,164,0.14);
-  --accent-diary-glow:    rgba(242,192,99,0.14);
-  --accent-gym-glow:      rgba(120,180,255,0.14);
-  --accent-recovery-glow: rgba(255,143,179,0.14);
-  --accent-finance-glow:  rgba(79,209,197,0.14);
-  --accent-coach-glow:    rgba(176,143,255,0.14);
+  /* Glow variables retained for the couple of components that still read
+     them; set to transparent so they no-op until swept. */
+  --accent-home-glow:     transparent;
+  --accent-diary-glow:    transparent;
+  --accent-gym-glow:      transparent;
+  --accent-recovery-glow: transparent;
+  --accent-finance-glow:  transparent;
+  --accent-coach-glow:    transparent;
 
   /* ── Elevation ramp — the shadow stack for hierarchy ─────────────────── */
   --elev-1:
@@ -141,42 +147,11 @@ a, button, [role="button"] {
 :focus { outline: none; }
 :focus-visible { outline: 2px solid rgba(107,227,164,0.5); outline-offset: 2px; border-radius: 2px; }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Ambient background — two drift gradients + grain. Motion is gated by the
-   global reduced-motion rule further down.
-   ────────────────────────────────────────────────────────────────────────── */
-body::before, body::after { content: ''; position: fixed; pointer-events: none; z-index: 0; }
-body::before {
-  width: 600px; height: 600px;
-  background: radial-gradient(circle, rgba(224,118,88,0.12), transparent 70%);
-  top: 14%; left: 82%; transform: translate(-50%,-50%);
-  filter: blur(48px);
-}
-body::after {
-  width: 540px; height: 540px;
-  background: radial-gradient(circle, rgba(107,227,164,0.06), transparent 70%);
-  top: 88%; left: 14%; transform: translate(-50%,-50%);
-  filter: blur(48px);
-}
-@media (prefers-reduced-motion: no-preference) {
-  body::before { animation: drift-warm 36s ease-in-out infinite alternate; }
-  body::after  { animation: drift-cool 42s ease-in-out infinite alternate-reverse; }
-}
-
-@keyframes drift-warm {
-  0%   { transform: translate(-50%,-50%) scale(1); }
-  100% { transform: translate(-50%,-50%) scale(1.15) translate(40px,20px); }
-}
-@keyframes drift-cool {
-  0%   { transform: translate(-50%,-50%) scale(1); }
-  100% { transform: translate(-50%,-50%) scale(1.1) translate(-30px,30px); }
-}
-
-.grain {
-  position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: 0.014;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='3' height='3'%3E%3Crect width='1' height='1' fill='white'/%3E%3C/svg%3E");
-  background-repeat: repeat; background-size: 3px 3px;
-}
+/* Ambient background gradients + grain overlay removed in the 2026-07
+   overhaul — industrial UI is flat and calm. The `.grain` class is still
+   emitted by app/layout.tsx as an aria-hidden div; leaving it as a no-op
+   here so it doesn't render anything.  */
+.grain { display: none; }
 
 /* ──────────────────────────────────────────────────────────────────────────
    Layout — desktop sidebar / mobile bottom-nav handled in Sidebar.tsx.
@@ -208,38 +183,31 @@ body::after {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Cards — three-level elevation ramp. Default .card is elev-1; add
-   .card-raised for section-primary cards; .card-floating for modals/sheets.
+   Cards — flat, industrial. Three-level ramp via opacity + border. No
+   backdrop-filter glass, no radial-gradient sheen. Elevation is one soft
+   shadow, not a stack.
    ────────────────────────────────────────────────────────────────────────── */
 .card {
   position: relative;
-  background:
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(255,255,255,0.025) 100%),
-    var(--surface-1);
+  background: var(--surface-1);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--r-5);
+  border-radius: var(--r-4);
   padding: 20px;
-  backdrop-filter: blur(28px) saturate(1.25);
-  -webkit-backdrop-filter: blur(28px) saturate(1.25);
-  box-shadow: var(--elev-1);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.4);
 }
 .card-raised {
-  background:
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.025) 45%, rgba(255,255,255,0.03) 100%),
-    var(--surface-2);
+  background: var(--surface-2);
   border-color: var(--border-quiet);
-  box-shadow: var(--elev-2);
+  box-shadow: 0 2px 0 rgba(0,0,0,0.5), 0 8px 24px rgba(0,0,0,0.24);
 }
 .card-floating {
-  background:
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 45%, rgba(255,255,255,0.035) 100%),
-    var(--surface-3);
+  background: var(--surface-3);
   border-color: var(--border-strong);
-  box-shadow: var(--elev-3);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.6), 0 24px 48px rgba(0,0,0,0.4);
 }
 
-/* Section-accent left borders on primary cards. Pair with .card-raised for
-   the "this is the important thing on this page" treatment. */
+/* Section-accent left stripe — ONLY appears on a page's single hero card
+   (paired with .card-raised). Everything else is neutral. */
 .card-accent-home     { border-left: 2px solid var(--accent-home); }
 .card-accent-diary    { border-left: 2px solid var(--accent-diary); }
 .card-accent-gym      { border-left: 2px solid var(--accent-gym); }
@@ -248,7 +216,7 @@ body::after {
 .card-accent-coach    { border-left: 2px solid var(--accent-coach); }
 
 @media (max-width: 640px) {
-  .card { border-radius: var(--r-4); padding: 16px 14px; }
+  .card { border-radius: var(--r-3); padding: 16px 14px; }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -265,15 +233,11 @@ body::after {
   padding: 0 6px 8px;
 }
 .lr-group {
-  background:
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(255,255,255,0.025) 100%),
-    var(--surface-1);
+  background: var(--surface-1);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-4);
-  box-shadow: var(--elev-1);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.4);
   overflow: hidden;
-  backdrop-filter: blur(28px) saturate(1.25);
-  -webkit-backdrop-filter: blur(28px) saturate(1.25);
 }
 /* Hairline divider between adjacent rows in a group, indented past the leading slot */
 .lr-group > .lr + .lr::before {
@@ -369,28 +333,23 @@ body::after {
    Typography.
    ────────────────────────────────────────────────────────────────────────── */
 .section-title {
-  font-family: var(--font-mono);
-  font-size: 10px; font-weight: 600; letter-spacing: 0.18em;
-  text-transform: uppercase; color: var(--text-tertiary);
-  display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+  font-family: var(--font-sans);
+  font-size: 15px; font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+  margin-bottom: 14px;
 }
-.section-title::before { content: ''; width: 14px; height: 1px; background: var(--text-tertiary); opacity: 0.6; flex-shrink: 0; }
-.section-title::after  { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0.08), transparent); }
 
-/* The serif italic moment. One per page. */
 .page-title {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-weight: 400;
-  font-size: clamp(34px, 6.5vw, 50px);
-  line-height: 0.95;
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-weight: 600;
+  font-size: clamp(26px, 4vw, 32px);
+  line-height: 1.15;
   letter-spacing: -0.02em;
   color: var(--text-primary);
   margin-bottom: 22px;
-  /* Even line lengths on the rare two-line title. */
   text-wrap: balance;
-  /* Subtle glow so it sits on the dark backdrop without floating. */
-  text-shadow: 0 1px 24px rgba(255,255,255,0.04);
 }
 
 /* Heading rhythm — every h1/h2/h3 gets balanced wrapping; long prose blocks
@@ -400,7 +359,7 @@ p, .ai-response, .ai-response p { text-wrap: pretty; }
 
 @media (max-width: 640px) {
   .page-title {
-    font-size: clamp(30px, 9vw, 42px);
+    font-size: clamp(22px, 7vw, 28px);
     margin-bottom: 18px;
   }
 }
@@ -492,12 +451,11 @@ p, .ai-response, .ai-response p { text-wrap: pretty; }
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
 }
 .sh-pip {
   width: 6px; height: 6px;
@@ -505,8 +463,16 @@ p, .ai-response, .ai-response p { text-wrap: pretty; }
   flex-shrink: 0;
 }
 .sh-label { flex-shrink: 0; }
-.sh-line  { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0.08), transparent); }
-.sh-trailing { flex-shrink: 0; }
+.sh-line { display: none; }
+.sh-trailing {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
 
 /* ──────────────────────────────────────────────────────────────────────────
    Toggle primitive (components/layout/Toggle.tsx).
@@ -589,15 +555,14 @@ p, .ai-response, .ai-response p { text-wrap: pretty; }
   color: var(--text-tertiary);
 }
 .ph-large {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-weight: 400;
-  font-size: clamp(34px, 6.5vw, 54px);
-  line-height: 0.95;
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-weight: 600;
+  font-size: clamp(26px, 4vw, 34px);
+  line-height: 1.15;
   letter-spacing: -0.02em;
   color: var(--text-primary);
   text-wrap: balance;
-  text-shadow: 0 1px 24px rgba(255,255,255,0.04);
 }
 .ph-sentinel {
   position: absolute;
@@ -610,9 +575,8 @@ p, .ai-response, .ai-response p { text-wrap: pretty; }
   top: 0; left: var(--sidebar-w); right: 0;
   z-index: 90;
   padding-top: env(safe-area-inset-top);
-  background: rgba(5,5,6,0.75);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  background: rgba(8,8,10,0.9);
+  border-bottom: 1px solid var(--border-subtle);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-base) var(--ease-out);
@@ -634,10 +598,10 @@ p, .ai-response, .ai-response p { text-wrap: pretty; }
   min-height: 44px;
 }
 .ph-sticky-title {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-weight: 400;
-  font-size: var(--text-lg);
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-weight: 600;
+  font-size: var(--text-md);
   letter-spacing: -0.01em;
   color: var(--text-primary);
 }

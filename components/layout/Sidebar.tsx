@@ -66,8 +66,9 @@ export default function Sidebar() {
         .nav-brand {
           display: flex; align-items: center; gap: 12px;
           padding: 0 12px; margin-bottom: 36px;
-          font-family: var(--font-serif); font-style: italic; font-weight: 400;
-          font-size: 22px; color: var(--text-primary);
+          font-family: var(--font-sans);
+          font-weight: 600; letter-spacing: -0.02em;
+          font-size: 17px; color: var(--text-primary);
           white-space: nowrap; overflow: hidden;
         }
         .nav-brand-glyph {

@@ -68,7 +68,7 @@ export default function PastEntries({
   if (entries.length === 0) return null;
 
   return (
-    <div className="card card-accent-diary">
+    <div className="card">
       <style>{`
         .pe-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
         .pe-search {
@@ -138,7 +138,7 @@ export default function PastEntries({
           padding: 12px 14px;
           background: rgba(255,255,255,0.025);
           border-radius: 10px;
-          font-family: var(--font-serif);
+          font-family: var(--font-sans);
           font-size: 15px;
           line-height: 1.6;
           color: var(--text-primary);

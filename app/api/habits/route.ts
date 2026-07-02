@@ -24,6 +24,19 @@ function isHabitDueToday(habit: Record<string, unknown>, date: string): boolean 
   }
 }
 
+function createdOnOrBeforeActiveDate(createdAt: string | null | undefined, date: string): boolean {
+  if (!createdAt) return true;
+
+  // `created_at` is stored in UTC, while the dashboard asks for the user's
+  // active local day. In US evenings, a just-created habit can already have
+  // tomorrow's UTC date; treat that one-day UTC lead as the same active day so
+  // new habits don't disappear immediately after being added.
+  const created = new Date(createdAt);
+  if (Number.isNaN(created.getTime())) return true;
+  created.setUTCDate(created.getUTCDate() - 1);
+  return created.toISOString().split('T')[0] <= date;
+}
+
 // Walks back day-by-day, skipping days the habit isn't scheduled on, and breaks
 // the first time a scheduled day's count fell short of goal_value. Only meaningful
 // for daily-period habits — weekly/monthly periods don't have a coherent day streak.
@@ -94,7 +107,7 @@ export async function GET(req: NextRequest) {
   const result = habits
     // Don't surface a habit on dates before it was created — otherwise a habit
     // you added today will look "missed" for every prior week it was scheduled.
-    .filter(h => ((h.created_at as string) ?? '').split('T')[0] <= date)
+    .filter(h => createdOnOrBeforeActiveDate(h.created_at as string | null | undefined, date))
     .filter(h => isHabitDueToday(h, date))
     .map(h => {
       const periodStart = getPeriodStart(date, h.goal_period as string);

@@ -91,7 +91,7 @@ export default function RelapsePreventionPlan() {
         .rp-textarea::placeholder { color: var(--text-tertiary); }
 
         .rp-why {
-          font-family: var(--font-serif);
+          font-family: var(--font-sans);
           font-style: italic;
           font-size: 17px;
           min-height: 60px;
