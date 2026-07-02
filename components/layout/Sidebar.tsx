@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { House, NotebookPen, Dumbbell, HeartPulse, Wallet, Brain, type LucideIcon } from 'lucide-react';
 
@@ -26,6 +27,24 @@ const NAV: NavItem[] = [
 
 export default function Sidebar() {
   const path = usePathname();
+
+  // iOS Safari repositions position:fixed elements against the *visual*
+  // viewport while the on-screen keyboard is open, which is what shoves the
+  // bottom nav pill into the middle of the screen on input-heavy pages (the
+  // workout logger). Detect the keyboard via visualViewport shrink and hide
+  // the mobile nav until it closes.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onChange = () => setKeyboardOpen(window.innerHeight - vv.height > 140);
+    vv.addEventListener('resize', onChange);
+    vv.addEventListener('scroll', onChange);
+    return () => {
+      vv.removeEventListener('resize', onChange);
+      vv.removeEventListener('scroll', onChange);
+    };
+  }, []);
 
   const activeSection = NAV.find(n => n.href === path)?.section;
   const activeAccent  = activeSection ? `var(--accent-${activeSection})` : 'var(--success)';
@@ -123,6 +142,7 @@ export default function Sidebar() {
 
         /* ── Mobile: floating pill above the safe-area ─────────────────── */
         .nav-mobile { display: none; }
+        .nav-mobile.nav-kb-hidden { display: none !important; }
 
         @media (max-width: 640px) {
           .nav-desktop { display: none; }
@@ -215,7 +235,7 @@ export default function Sidebar() {
       </nav>
 
       {/* Mobile */}
-      <nav className="nav nav-mobile" aria-label="Primary">
+      <nav className={`nav nav-mobile${keyboardOpen ? ' nav-kb-hidden' : ''}`} aria-label="Primary">
         <div className="nav-mobile-list">
           {NAV.map(({ href, Icon, label, section }) => {
             const isActive = path === href;

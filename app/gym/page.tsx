@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { getActiveDateString } from '@/lib/dates';
 import SplitManager from '@/components/gym/SplitManager';
 import DaySelector from '@/components/gym/DaySelector';
-import WorkoutSession from '@/components/gym/WorkoutSession';
+import WorkoutSession, { GYM_ACTIVE_WORKOUT_KEY, type ActiveWorkoutRecord, type ResumeInfo } from '@/components/gym/WorkoutSession';
 import ProgressGraph from '@/components/gym/ProgressGraph';
 import WorkoutHistory from '@/components/gym/WorkoutHistory';
 import ExerciseSparklineGrid from '@/components/gym/ExerciseSparklineGrid';
@@ -23,6 +24,7 @@ export default function GymPage() {
   const [view, setView] = useState<'home' | 'select' | 'session'>('home');
   const [activeDayId, setActiveDayId] = useState<string | null>(null);
   const [dayLabel, setDayLabel] = useState('');
+  const [resume, setResume] = useState<ResumeInfo | null>(null);
   const [graphKey, setGraphKey] = useState(0);
   const [restDuration, setRestDuration] = useState(90);
   const [showSettings, setShowSettings] = useState(false);
@@ -32,6 +34,40 @@ export default function GymPage() {
     if (v) setRestDuration(Number(v));
   }, []);
 
+  // Auto-resume: if the app was killed mid-workout (iOS PWA), the active
+  // session record survives in localStorage. Same-day only — a workout left
+  // over from a previous day stays in History for manual resume.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(GYM_ACTIVE_WORKOUT_KEY);
+      if (!raw) return;
+      const rec = JSON.parse(raw) as ActiveWorkoutRecord;
+      if (!rec.sessionId || rec.date !== getActiveDateString()) {
+        localStorage.removeItem(GYM_ACTIVE_WORKOUT_KEY);
+        return;
+      }
+      setResume({
+        sessionId: rec.sessionId,
+        date: rec.date,
+        baseElapsed: Math.max(0, Math.floor((Date.now() - rec.startEpoch) / 1000)),
+      });
+      setActiveDayId(rec.splitDayId ?? null);
+      setDayLabel(rec.dayLabel ?? '');
+      setView('session');
+    } catch {
+      localStorage.removeItem(GYM_ACTIVE_WORKOUT_KEY);
+    }
+  }, []);
+
+  // Flag the workout on <body> so global chrome (the floating settings gear)
+  // can hide itself — it overlaps the End button on mobile and navigating
+  // away would drop the session.
+  useEffect(() => {
+    if (view !== 'session') return;
+    document.body.setAttribute('data-workout-active', '1');
+    return () => document.body.removeAttribute('data-workout-active');
+  }, [view]);
+
   function updateRestDuration(val: number) {
     const clamped = Math.max(10, Math.min(600, val));
     setRestDuration(clamped);
@@ -39,8 +75,18 @@ export default function GymPage() {
   }
 
   function startDay(dayId: string | null, label: string) {
+    setResume(null);
     setActiveDayId(dayId);
     setDayLabel(label);
+    setView('session');
+  }
+
+  // Re-open a past workout from History: same session id, original date, and
+  // the timer picks up from the recorded duration.
+  function resumeWorkout(info: { sessionId: string; date: string; splitDayId: string | null; dayLabel: string; baseElapsed: number }) {
+    setResume({ sessionId: info.sessionId, date: info.date, baseElapsed: info.baseElapsed });
+    setActiveDayId(info.splitDayId);
+    setDayLabel(info.dayLabel);
     setView('session');
   }
 
@@ -48,6 +94,7 @@ export default function GymPage() {
     setView('home');
     setActiveDayId(null);
     setDayLabel('');
+    setResume(null);
     setGraphKey(k => k + 1);
   }
 
@@ -111,7 +158,7 @@ export default function GymPage() {
           </button>
           <BodyWeightCard />
           <HealthMetricsCard />
-          <WorkoutHistory refreshKey={graphKey} />
+          <WorkoutHistory refreshKey={graphKey} onResume={resumeWorkout} />
           <ExerciseSparklineGrid refreshKey={graphKey} />
           <ProgressGraph refreshKey={graphKey} />
         </>
@@ -120,7 +167,14 @@ export default function GymPage() {
         <DaySelector onStart={startDay} onCancel={() => setView('home')} />
       )}
       {view === 'session' && (
-        <WorkoutSession splitDayId={activeDayId} dayLabel={dayLabel} onFinish={finish} restDuration={restDuration} />
+        <WorkoutSession
+          key={resume?.sessionId ?? 'new'}
+          splitDayId={activeDayId}
+          dayLabel={dayLabel}
+          onFinish={finish}
+          restDuration={restDuration}
+          resume={resume}
+        />
       )}
     </>
   );

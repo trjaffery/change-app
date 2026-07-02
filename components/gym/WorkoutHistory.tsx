@@ -5,10 +5,19 @@ interface Session {
   id: string;
   date: string;
   started_at: string;
+  split_day_id: string | null;
   duration_seconds: number | null;
   rpe: number | null;
   notes: string | null;
   split_days: { name: string } | null;
+}
+
+export interface ResumeRequest {
+  sessionId: string;
+  date: string;
+  splitDayId: string | null;
+  dayLabel: string;
+  baseElapsed: number;
 }
 interface SetRow { id: string; exercise: string; reps: number; weight: number }
 interface SplitDay { day_of_week: number[] | null; name: string }
@@ -46,7 +55,7 @@ function fmtDate(dateStr: string) {
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-export default function WorkoutHistory({ refreshKey }: { refreshKey: number }) {
+export default function WorkoutHistory({ refreshKey, onResume }: { refreshKey: number; onResume?: (info: ResumeRequest) => void }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -75,6 +84,8 @@ export default function WorkoutHistory({ refreshKey }: { refreshKey: number }) {
     offsetRef.current = 0;
     setHasMore(true);
     setExpanded(null);
+    // Drop cached set details — a resumed/edited workout changes past days' sets.
+    setDetail({});
     fetchPage(0, true);
   }, [fetchPage, refreshKey]);
 
@@ -235,13 +246,29 @@ export default function WorkoutHistory({ refreshKey }: { refreshKey: number }) {
                     </div>
                   );
                 })}
-                <button
-                  onClick={() => deleteSession(session.id)}
-                  disabled={deleting === session.id}
-                  style={{ marginTop: 8, fontSize: 11, padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(255,80,80,0.25)', background: 'rgba(255,80,80,0.06)', color: 'rgba(255,100,100,0.8)', cursor: 'pointer', opacity: deleting === session.id ? 0.5 : 1 }}
-                >
-                  {deleting === session.id ? 'Deleting…' : 'Delete workout'}
-                </button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  {onResume && (
+                    <button
+                      onClick={() => onResume({
+                        sessionId: session.id,
+                        date: session.date,
+                        splitDayId: session.split_day_id,
+                        dayLabel: session.split_days?.name ?? 'Free workout',
+                        baseElapsed: session.duration_seconds ?? 0,
+                      })}
+                      style={{ fontSize: 11, padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(107,227,164,0.3)', background: 'rgba(107,227,164,0.08)', color: 'var(--success)', cursor: 'pointer' }}
+                    >
+                      Resume & edit
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deleteSession(session.id)}
+                    disabled={deleting === session.id}
+                    style={{ fontSize: 11, padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(255,80,80,0.25)', background: 'rgba(255,80,80,0.06)', color: 'rgba(255,100,100,0.8)', cursor: 'pointer', opacity: deleting === session.id ? 0.5 : 1 }}
+                  >
+                    {deleting === session.id ? 'Deleting…' : 'Delete workout'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

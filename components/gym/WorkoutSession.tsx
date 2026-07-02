@@ -14,7 +14,10 @@ interface WorkoutSummary {
 }
 interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string; default_rest_seconds?: number | null }
 interface GymSet { id: string; exercise: string; reps: number; weight: number }
-interface SetRow { reps: string; weight: string; loggedId: string | null }
+// `uid` is a client-only identity so async completions (save/delete) can find
+// their row even after rows above it were deleted. `pending` = optimistic
+// save in flight — rendered as logged immediately.
+interface SetRow { uid: number; reps: string; weight: string; loggedId: string | null; pending?: boolean }
 interface ExerciseBlock {
   exercise: string;
   splitExId: string | null;
@@ -48,32 +51,65 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+let rowUidCounter = 0;
+const nextUid = () => ++rowUidCounter;
+
 function makeRows(count: number, defaultWeight: string, defaultReps: string): SetRow[] {
-  return Array.from({ length: count }, () => ({ reps: defaultReps, weight: defaultWeight, loggedId: null }));
+  return Array.from({ length: count }, () => ({ uid: nextUid(), reps: defaultReps, weight: defaultWeight, loggedId: null }));
 }
 
+// The in-progress workout is mirrored here so the gym page can auto-resume it
+// if iOS kills the PWA mid-session. Cleared when the workout is ended.
+export const GYM_ACTIVE_WORKOUT_KEY = 'gymActiveWorkout';
+export interface ActiveWorkoutRecord {
+  sessionId: string;
+  date: string;
+  splitDayId: string | null;
+  dayLabel: string;
+  startEpoch: number; // ms epoch the timer is anchored to
+}
+
+export interface ResumeInfo { sessionId: string; date: string; baseElapsed: number }
+
 export default function WorkoutSession({
-  splitDayId, dayLabel, onFinish, restDuration = 90,
+  splitDayId, dayLabel, onFinish, restDuration = 90, resume = null,
 }: {
   splitDayId: string | null;
   dayLabel: string;
   onFinish: () => void;
   restDuration?: number;
+  resume?: ResumeInfo | null;
 }) {
   const toast = useToast();
   const today = getActiveDateString();
+  // Resumed workouts keep logging to their original date, not today.
+  const sessionDate = resume?.date ?? today;
   const [blocks, setBlocks] = useState<ExerciseBlock[]>([]);
   const [allExercises, setAllExercises] = useState<string[]>([]);
   const [freeEx, setFreeEx] = useState('');
   const [loading, setLoading] = useState(true);
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState(resume?.baseElapsed ?? 0);
   const [restRemaining, setRestRemaining] = useState<number | null>(null);
-  const [restingAt, setRestingAt] = useState<{ bi: number; ri: number } | null>(null);
+  // Row uid the rest strip renders under — uid, not indices, so deleting rows
+  // above it can't shift the strip onto the wrong set.
+  const [restingUid, setRestingUid] = useState<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const sessionCreatedRef = useRef(false);
-  const elapsedRef = useRef(0);
+  const elapsedRef = useRef(resume?.baseElapsed ?? 0);
+  // Wall-clock anchors — setInterval freezes when the tab is backgrounded or
+  // the phone locks, so elapsed/rest are always derived from Date.now()
+  // instead of counting ticks. Lazily initialized outside render for purity.
+  const startEpochRef = useRef<number | null>(null);
+  const restEndsAtRef = useRef<number | null>(null);
+
+  function getStartEpoch(): number {
+    if (startEpochRef.current === null) {
+      startEpochRef.current = Date.now() - (resume?.baseElapsed ?? 0) * 1000;
+    }
+    return startEpochRef.current;
+  }
   // Finish modal
   const [showFinish, setShowFinish] = useState(false);
   const [finishRpe, setFinishRpe] = useState<number | null>(null);
@@ -83,35 +119,78 @@ export default function WorkoutSession({
   const [summary, setSummary] = useState<WorkoutSummary | null>(null);
   const [showSummary, setShowSummary] = useState(false);
 
-  // Create session record once — guard prevents StrictMode double-fire
+  function saveActiveRecord(sid: string) {
+    try {
+      const rec: ActiveWorkoutRecord = { sessionId: sid, date: sessionDate, splitDayId, dayLabel, startEpoch: getStartEpoch() };
+      localStorage.setItem(GYM_ACTIVE_WORKOUT_KEY, JSON.stringify(rec));
+    } catch { /* storage full/blocked — auto-resume just won't work */ }
+  }
+
+  // Create session record once (or attach to the resumed one) — guard prevents
+  // StrictMode double-fire
   useEffect(() => {
     if (sessionCreatedRef.current) return;
     sessionCreatedRef.current = true;
+    if (resume) {
+      sessionIdRef.current = resume.sessionId;
+      saveActiveRecord(resume.sessionId);
+      return;
+    }
     fetch('/api/gym/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ split_day_id: splitDayId, date: today }),
+      body: JSON.stringify({ split_day_id: splitDayId, date: sessionDate }),
     }).then(r => r.json()).then(data => {
       sessionIdRef.current = data.id;
+      saveActiveRecord(data.id);
     });
-  }, [splitDayId, today]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitDayId, sessionDate]);
 
-  // Workout timer — separate effect so it restarts cleanly after StrictMode remount
+  function tickElapsed() {
+    const secs = Math.max(0, Math.floor((Date.now() - getStartEpoch()) / 1000));
+    elapsedRef.current = secs;
+    setElapsed(secs);
+  }
+
+  function tickRest() {
+    const endsAt = restEndsAtRef.current;
+    if (endsAt === null) return;
+    const remaining = Math.ceil((endsAt - Date.now()) / 1000);
+    if (remaining <= 0) {
+      if (restTimerRef.current) clearInterval(restTimerRef.current);
+      restTimerRef.current = null;
+      restEndsAtRef.current = null;
+      setRestRemaining(null);
+      setRestingUid(null);
+    } else {
+      setRestRemaining(remaining);
+    }
+  }
+
+  // Workout timer — separate effect so it restarts cleanly after StrictMode
+  // remount. Ticks re-derive from the wall clock, and visibilitychange snaps
+  // both timers to the correct value the instant the app comes back.
   useEffect(() => {
-    timerRef.current = setInterval(() => {
-      elapsedRef.current += 1;
-      setElapsed(elapsedRef.current);
-    }, 1000);
+    timerRef.current = setInterval(tickElapsed, 1000);
+    const onVisible = () => {
+      if (document.hidden) return;
+      tickElapsed();
+      tickRest();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (restTimerRef.current) clearInterval(restTimerRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const init = useCallback(async () => {
     setLoading(true);
     const [todaySetsRes, allExRes] = await Promise.all([
-      fetch(`/api/gym?date=${today}`),
+      fetch(`/api/gym?date=${sessionDate}`),
       fetch('/api/gym/exercises'),
     ]);
     const todaySets: GymSet[] = await todaySetsRes.json();
@@ -122,7 +201,7 @@ export default function WorkoutSession({
       for (const s of todaySets) { if (!map[s.exercise]) map[s.exercise] = []; map[s.exercise].push(s); }
       setBlocks(Object.entries(map).map(([exercise, sets]) => ({
         exercise, splitExId: null, targetSets: sets.length, targetReps: '', restSeconds: null,
-        rows: sets.map(s => ({ reps: String(s.reps), weight: String(s.weight), loggedId: s.id })),
+        rows: sets.map(s => ({ uid: nextUid(), reps: String(s.reps), weight: String(s.weight), loggedId: s.id })),
         aiState: null,
         lastSet: null,
       })));
@@ -160,51 +239,43 @@ export default function WorkoutSession({
       const logged = todayByEx[ex.exercise] ?? [];
       let rows: SetRow[];
       if (logged.length > 0) {
-        rows = logged.map(s => ({ reps: String(s.reps), weight: String(s.weight), loggedId: s.id }));
-        while (rows.length < ex.target_sets) rows.push({ reps: ex.target_reps.split('-')[0], weight: lastWeight, loggedId: null });
+        rows = logged.map(s => ({ uid: nextUid(), reps: String(s.reps), weight: String(s.weight), loggedId: s.id }));
+        while (rows.length < ex.target_sets) rows.push({ uid: nextUid(), reps: ex.target_reps.split('-')[0], weight: lastWeight, loggedId: null });
       } else {
         rows = makeRows(ex.target_sets, lastWeight, ex.target_reps.split('-')[0]);
       }
       return { exercise: ex.exercise, splitExId: ex.id, targetSets: ex.target_sets, targetReps: ex.target_reps, restSeconds: ex.default_rest_seconds ?? null, rows, aiState: null, lastSet };
     }));
     setLoading(false);
-  }, [splitDayId, today]);
+  }, [splitDayId, sessionDate]);
 
   useEffect(() => { init(); }, [init]);
 
-  function startRest(bi: number, ri: number) {
+  function startRest(block: ExerciseBlock, rowUid: number) {
     if (restTimerRef.current) clearInterval(restTimerRef.current);
-    setRestingAt({ bi, ri });
+    setRestingUid(rowUid);
     // Phase 4 #14: per-exercise override wins; otherwise the compound/isolation
     // heuristic; otherwise the session-level fallback.
-    const block = blocks[bi];
     const effectiveRest = block.restSeconds ?? inferRest(block.exercise) ?? restDuration;
+    // eslint-disable-next-line react-hooks/purity -- event-handler path, not render
+    restEndsAtRef.current = Date.now() + effectiveRest * 1000;
     setRestRemaining(effectiveRest);
-    let remaining = effectiveRest;
-    restTimerRef.current = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        clearInterval(restTimerRef.current!);
-        restTimerRef.current = null;
-        setRestRemaining(null);
-        setRestingAt(null);
-      } else {
-        setRestRemaining(remaining);
-      }
-    }, 1000);
+    restTimerRef.current = setInterval(tickRest, 500);
   }
 
   function skipRest() {
     if (restTimerRef.current) clearInterval(restTimerRef.current);
     restTimerRef.current = null;
+    restEndsAtRef.current = null;
     setRestRemaining(null);
-    setRestingAt(null);
+    setRestingUid(null);
   }
 
   async function endWorkout(rpe: number | null, notes: string) {
     setFinishing(true);
     if (timerRef.current) clearInterval(timerRef.current);
     if (restTimerRef.current) clearInterval(restTimerRef.current);
+    try { localStorage.removeItem(GYM_ACTIVE_WORKOUT_KEY); } catch {}
     const sid = sessionIdRef.current;
     if (sid) {
       const body: Record<string, unknown> = { ended_at: new Date().toISOString(), duration_seconds: elapsedRef.current };
@@ -240,41 +311,91 @@ export default function WorkoutSession({
     setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.map((r, j) => j !== ri ? r : { ...r, [field]: value }) }));
   }
 
+  // Patch a single row wherever it currently lives — safe against rows/blocks
+  // shifting while a request was in flight.
+  function patchRowByUid(uid: number, patch: Partial<SetRow>) {
+    setBlocks(prev => prev.map(b =>
+      b.rows.some(r => r.uid === uid)
+        ? { ...b, rows: b.rows.map(r => r.uid === uid ? { ...r, ...patch } : r) }
+        : b
+    ));
+  }
+
   async function logSet(bi: number, ri: number) {
     const block = blocks[bi];
     const row = block.rows[ri];
-    if (!row.reps || !row.weight || row.loggedId) return;
+    if (!row.reps || !row.weight || row.loggedId || row.pending) return;
+    // Optimistic: check the box and start resting immediately; reconcile with
+    // the server in the background (same pattern as the habits page).
+    patchRowByUid(row.uid, { pending: true });
+    startRest(block, row.uid);
     try {
       const res = await fetch('/api/gym', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: today, exercise: block.exercise, reps: Number(row.reps), weight: Number(row.weight), split_day_id: splitDayId }),
+        body: JSON.stringify({ date: sessionDate, exercise: block.exercise, reps: Number(row.reps), weight: Number(row.weight), split_day_id: splitDayId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const saved: GymSet = await res.json();
-      setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.map((r, j) => j !== ri ? r : { ...r, loggedId: saved.id }) }));
-      startRest(bi, ri);
+      patchRowByUid(row.uid, { loggedId: saved.id, pending: false });
     } catch {
+      patchRowByUid(row.uid, { pending: false });
+      skipRest();
       toast({ kind: 'error', message: "Couldn't save set — try again" });
     }
   }
 
   async function unlogSet(bi: number, ri: number) {
     const row = blocks[bi].rows[ri];
-    if (!row.loggedId) return;
+    if (!row.loggedId || row.pending) return;
+    const prevId = row.loggedId;
+    patchRowByUid(row.uid, { loggedId: null });
     try {
-      const res = await fetch(`/api/gym/${row.loggedId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/gym/${prevId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.map((r, j) => j !== ri ? r : { ...r, loggedId: null }) }));
     } catch {
+      patchRowByUid(row.uid, { loggedId: prevId });
       toast({ kind: 'error', message: "Couldn't remove set" });
     }
   }
 
   function addSetRow(bi: number) {
     setBlocks(prev => prev.map((b, i) => i !== bi ? b : {
-      ...b, rows: [...b.rows, { reps: b.targetReps.split('-')[0] || '', weight: b.rows.at(-1)?.weight ?? '', loggedId: null }],
+      ...b, rows: [...b.rows, { uid: nextUid(), reps: b.targetReps.split('-')[0] || '', weight: b.rows.at(-1)?.weight ?? '', loggedId: null }],
     }));
+  }
+
+  async function deleteSetRow(bi: number, ri: number) {
+    const row = blocks[bi].rows[ri];
+    if (row.pending) return;
+    if (restingUid === row.uid) skipRest();
+    setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.filter(r => r.uid !== row.uid) }));
+    if (row.loggedId) {
+      try {
+        const res = await fetch(`/api/gym/${row.loggedId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch {
+        toast({ kind: 'error', message: "Couldn't delete set" });
+        init(); // rebuild from server so UI matches reality
+      }
+    }
+  }
+
+  // Removes the exercise from THIS workout only (its logged sets today).
+  // Never touches the split template, so the schedule is unchanged.
+  async function removeExercise(bi: number) {
+    const block = blocks[bi];
+    const loggedIds = block.rows.filter(r => r.loggedId).map(r => r.loggedId!);
+    if (loggedIds.length > 0 && !confirm(`Remove ${block.exercise} and its ${loggedIds.length} logged set${loggedIds.length === 1 ? '' : 's'} from this workout?`)) return;
+    if (block.rows.some(r => r.uid === restingUid)) skipRest();
+    setBlocks(prev => prev.filter((_, i) => i !== bi));
+    if (loggedIds.length > 0) {
+      const results = await Promise.allSettled(loggedIds.map(id => fetch(`/api/gym/${id}`, { method: 'DELETE' })));
+      if (results.some(r => r.status === 'rejected' || !r.value.ok)) {
+        toast({ kind: 'error', message: "Couldn't remove all sets" });
+        init();
+      }
+    }
   }
 
   async function addFreeExercise() {
@@ -331,7 +452,7 @@ export default function WorkoutSession({
     }));
   }
 
-  const doneCount = blocks.reduce((n, b) => n + b.rows.filter(r => r.loggedId).length, 0);
+  const doneCount = blocks.reduce((n, b) => n + b.rows.filter(r => r.loggedId || r.pending).length, 0);
 
   if (loading) return <div style={{ minHeight: 200 }} />;
 
@@ -478,7 +599,7 @@ export default function WorkoutSession({
         /* ─── SET ROW ─────────────────────────────────────────────────── */
         .ws-set {
           display: grid;
-          grid-template-columns: 22px 1fr 12px 1fr 22px 38px;
+          grid-template-columns: 22px 1fr 12px 1fr 22px 38px 26px;
           align-items: center;
           gap: 8px;
           height: 42px;
@@ -571,6 +692,21 @@ export default function WorkoutSession({
         }
         .ws-set-check:disabled { opacity: 0.28; cursor: default; }
         .ws-set-check:not(:disabled):active { transform: scale(0.92); }
+
+        .ws-set-del {
+          width: 26px; height: 30px;
+          padding: 0;
+          background: transparent;
+          border: none;
+          color: var(--text-tertiary);
+          font-size: 15px; line-height: 1;
+          cursor: pointer;
+          opacity: 0.55;
+          transition: color 140ms ease, opacity 140ms ease;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .ws-set-del:hover, .ws-set-del:focus-visible { color: var(--danger); opacity: 1; }
+        .ws-set-del:active { transform: scale(0.9); }
 
         /* Slim rest-timer strip below the row that triggered it */
         .ws-rest {
@@ -687,7 +823,7 @@ export default function WorkoutSession({
         <div className="ws-dots" aria-hidden>
           {blocks.flatMap((b, bi) =>
             b.rows.map((r, ri) => (
-              <span key={`${bi}-${ri}`} className={`ws-dot${r.loggedId ? ' done' : ''}`} />
+              <span key={`${bi}-${ri}`} className={`ws-dot${(r.loggedId || r.pending) ? ' done' : ''}`} />
             ))
           )}
         </div>
@@ -791,7 +927,7 @@ export default function WorkoutSession({
       {/* Exercise sections — flat, dense, mono-driven */}
       {blocks.map((block, bi) => {
         // Index of the first un-logged row in this block; that's the "active" set.
-        const activeIdx = block.rows.findIndex(r => !r.loggedId);
+        const activeIdx = block.rows.findIndex(r => !r.loggedId && !r.pending);
         const lastTone = block.lastSet?.daysAgo === 0 ? 'today'
           : block.lastSet?.daysAgo === 1 ? 'yest'
           : `${block.lastSet?.daysAgo}d`;
@@ -831,14 +967,22 @@ export default function WorkoutSession({
               >
                 {block.aiState?.loading ? '…' : '✦'}
               </button>
+              <button
+                className="ws-section-ai"
+                onClick={() => removeExercise(bi)}
+                aria-label="Remove exercise from this workout"
+                title="Remove exercise from this workout"
+              >
+                ×
+              </button>
             </header>
 
             {block.rows.map((row, ri) => {
-              const logged = !!row.loggedId;
+              const logged = !!row.loggedId || !!row.pending;
               const isActive = !logged && ri === activeIdx;
               const canLog = !logged && !!row.reps && !!row.weight;
               return (
-                <Fragment key={ri}>
+                <Fragment key={row.uid}>
                   <div className={`ws-set${logged ? ' logged' : isActive ? ' active' : ''}`}>
                     <span className="ws-set-idx">{String(ri + 1).padStart(2, '0')}</span>
                     {logged ? (
@@ -851,6 +995,7 @@ export default function WorkoutSession({
                         min={1}
                         placeholder="—"
                         value={row.reps}
+                        onFocus={e => e.currentTarget.select()}
                         onChange={e => updateRow(bi, ri, 'reps', e.target.value)}
                       />
                     )}
@@ -866,6 +1011,7 @@ export default function WorkoutSession({
                         step={0.5}
                         placeholder="—"
                         value={row.weight}
+                        onFocus={e => e.currentTarget.select()}
                         onChange={e => updateRow(bi, ri, 'weight', e.target.value)}
                       />
                     )}
@@ -882,9 +1028,17 @@ export default function WorkoutSession({
                         </svg>
                       )}
                     </button>
+                    <button
+                      className="ws-set-del"
+                      onClick={() => deleteSetRow(bi, ri)}
+                      aria-label="Delete set"
+                      title="Delete set"
+                    >
+                      ×
+                    </button>
                   </div>
 
-                  {restingAt?.bi === bi && restingAt?.ri === ri && restRemaining !== null && (
+                  {restingUid === row.uid && restRemaining !== null && (
                     <div className="ws-rest">
                       <span className="ws-rest-label">Rest</span>
                       <span className="ws-rest-time">{formatTime(restRemaining)}</span>

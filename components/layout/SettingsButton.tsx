@@ -43,6 +43,10 @@ export default function SettingsButton() {
           background: rgba(5,5,6,0.78);
         }
         .settings-fab:active { transform: translateZ(0) scale(0.95); }
+        /* During an active gym workout the gear overlaps the End button on
+           mobile, and tapping it navigates away and kills the session — hide
+           it entirely. The gym page sets/clears this body attribute. */
+        body[data-workout-active] .settings-fab { display: none; }
         /* On desktop the sidebar already exists; offset slightly so the gear
            doesn't sit flush against the top-right where window controls are. */
         @media (min-width: 641px) {
