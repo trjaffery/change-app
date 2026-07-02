@@ -13,11 +13,12 @@ interface WorkoutSummary {
   note: string | null;
 }
 interface SplitExercise { id: string; exercise: string; target_sets: number; target_reps: string; default_rest_seconds?: number | null }
-interface GymSet { id: string; exercise: string; reps: number; weight: number }
+interface GymSet { id: string; exercise: string; reps: number; weight: number; parent_set_id?: string | null }
 // `uid` is a client-only identity so async completions (save/delete) can find
 // their row even after rows above it were deleted. `pending` = optimistic
-// save in flight — rendered as logged immediately.
-interface SetRow { uid: number; reps: string; weight: string; loggedId: string | null; pending?: boolean }
+// save in flight — rendered as logged immediately. `parentUid` points at the
+// row this drop set belongs to (null = normal set).
+interface SetRow { uid: number; reps: string; weight: string; loggedId: string | null; pending?: boolean; parentUid: number | null }
 interface ExerciseBlock {
   exercise: string;
   splitExId: string | null;
@@ -55,7 +56,30 @@ let rowUidCounter = 0;
 const nextUid = () => ++rowUidCounter;
 
 function makeRows(count: number, defaultWeight: string, defaultReps: string): SetRow[] {
-  return Array.from({ length: count }, () => ({ uid: nextUid(), reps: defaultReps, weight: defaultWeight, loggedId: null }));
+  return Array.from({ length: count }, () => ({ uid: nextUid(), reps: defaultReps, weight: defaultWeight, loggedId: null, parentUid: null }));
+}
+
+// Rebuild session rows from persisted sets: top-level sets in logged order,
+// each drop set slotted directly after its parent (and the parent's earlier
+// drops). Orphaned drops (parent deleted server-side) fall to the end as
+// normal rows.
+function buildRowsFromSets(sets: GymSet[]): SetRow[] {
+  const rows: SetRow[] = [];
+  const uidByLoggedId = new Map<string, number>();
+  for (const s of sets.filter(x => !x.parent_set_id)) {
+    const uid = nextUid();
+    uidByLoggedId.set(s.id, uid);
+    rows.push({ uid, reps: String(s.reps), weight: String(s.weight), loggedId: s.id, parentUid: null });
+  }
+  for (const d of sets.filter(x => x.parent_set_id)) {
+    const parentUid = uidByLoggedId.get(d.parent_set_id!) ?? null;
+    const row: SetRow = { uid: nextUid(), reps: String(d.reps), weight: String(d.weight), loggedId: d.id, parentUid };
+    let idx = rows.findIndex(r => r.uid === parentUid);
+    if (idx === -1) { rows.push(row); continue; }
+    while (idx + 1 < rows.length && rows[idx + 1].parentUid === parentUid) idx++;
+    rows.splice(idx + 1, 0, row);
+  }
+  return rows;
 }
 
 // The in-progress workout is mirrored here so the gym page can auto-resume it
@@ -201,7 +225,7 @@ export default function WorkoutSession({
       for (const s of todaySets) { if (!map[s.exercise]) map[s.exercise] = []; map[s.exercise].push(s); }
       setBlocks(Object.entries(map).map(([exercise, sets]) => ({
         exercise, splitExId: null, targetSets: sets.length, targetReps: '', restSeconds: null,
-        rows: sets.map(s => ({ uid: nextUid(), reps: String(s.reps), weight: String(s.weight), loggedId: s.id })),
+        rows: buildRowsFromSets(sets),
         aiState: null,
         lastSet: null,
       })));
@@ -239,8 +263,10 @@ export default function WorkoutSession({
       const logged = todayByEx[ex.exercise] ?? [];
       let rows: SetRow[];
       if (logged.length > 0) {
-        rows = logged.map(s => ({ uid: nextUid(), reps: String(s.reps), weight: String(s.weight), loggedId: s.id }));
-        while (rows.length < ex.target_sets) rows.push({ uid: nextUid(), reps: ex.target_reps.split('-')[0], weight: lastWeight, loggedId: null });
+        rows = buildRowsFromSets(logged);
+        // Pad up to the target counting only top-level sets — drops are extras.
+        let mainCount = rows.filter(r => r.parentUid === null).length;
+        while (mainCount < ex.target_sets) { rows.push({ uid: nextUid(), reps: ex.target_reps.split('-')[0], weight: lastWeight, loggedId: null, parentUid: null }); mainCount++; }
       } else {
         rows = makeRows(ex.target_sets, lastWeight, ex.target_reps.split('-')[0]);
       }
@@ -325,6 +351,10 @@ export default function WorkoutSession({
     const block = blocks[bi];
     const row = block.rows[ri];
     if (!row.reps || !row.weight || row.loggedId || row.pending) return;
+    // Drop sets need their parent's server id — wait until the parent's
+    // optimistic save has confirmed (the check button is disabled until then).
+    const parentRow = row.parentUid !== null ? block.rows.find(r => r.uid === row.parentUid) : undefined;
+    if (row.parentUid !== null && !parentRow?.loggedId) return;
     // Optimistic: check the box and start resting immediately; reconcile with
     // the server in the background (same pattern as the habits page).
     patchRowByUid(row.uid, { pending: true });
@@ -333,7 +363,10 @@ export default function WorkoutSession({
       const res = await fetch('/api/gym', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: sessionDate, exercise: block.exercise, reps: Number(row.reps), weight: Number(row.weight), split_day_id: splitDayId }),
+        body: JSON.stringify({
+          date: sessionDate, exercise: block.exercise, reps: Number(row.reps), weight: Number(row.weight),
+          split_day_id: splitDayId, parent_set_id: parentRow?.loggedId ?? undefined,
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const saved: GymSet = await res.json();
@@ -349,27 +382,52 @@ export default function WorkoutSession({
     const row = blocks[bi].rows[ri];
     if (!row.loggedId || row.pending) return;
     const prevId = row.loggedId;
+    // Deleting the parent cascades to its drop sets in the DB — mirror that
+    // locally so their checkmarks clear too (rows stay, ready to re-log).
+    const children = blocks[bi].rows.filter(r => r.parentUid === row.uid && r.loggedId)
+      .map(r => ({ uid: r.uid, loggedId: r.loggedId! }));
     patchRowByUid(row.uid, { loggedId: null });
+    for (const c of children) patchRowByUid(c.uid, { loggedId: null });
     try {
       const res = await fetch(`/api/gym/${prevId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch {
       patchRowByUid(row.uid, { loggedId: prevId });
+      for (const c of children) patchRowByUid(c.uid, { loggedId: c.loggedId });
       toast({ kind: 'error', message: "Couldn't remove set" });
     }
   }
 
   function addSetRow(bi: number) {
     setBlocks(prev => prev.map((b, i) => i !== bi ? b : {
-      ...b, rows: [...b.rows, { uid: nextUid(), reps: b.targetReps.split('-')[0] || '', weight: b.rows.at(-1)?.weight ?? '', loggedId: null }],
+      ...b, rows: [...b.rows, { uid: nextUid(), reps: b.targetReps.split('-')[0] || '', weight: b.rows.at(-1)?.weight ?? '', loggedId: null, parentUid: null }],
+    }));
+  }
+
+  // Swipe-left on a set row inserts a drop set directly below it. Weight is
+  // prefilled ~20% lighter (nearest 5 lb); swiping a drop row chains another
+  // drop onto the same parent.
+  function addDropSet(bi: number, ri: number) {
+    setBlocks(prev => prev.map((b, i) => {
+      if (i !== bi) return b;
+      const src = b.rows[ri];
+      if (!src) return b;
+      const parentUid = src.parentUid ?? src.uid;
+      const w = Number(src.weight);
+      const dropWeight = Number.isFinite(w) && w > 0 ? String(Math.max(5, Math.round((w * 0.8) / 5) * 5)) : '';
+      const rows = [...b.rows];
+      rows.splice(ri + 1, 0, { uid: nextUid(), reps: src.reps, weight: dropWeight, loggedId: null, parentUid });
+      return { ...b, rows };
     }));
   }
 
   async function deleteSetRow(bi: number, ri: number) {
     const row = blocks[bi].rows[ri];
     if (row.pending) return;
-    if (restingUid === row.uid) skipRest();
-    setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.filter(r => r.uid !== row.uid) }));
+    // A parent takes its drop rows with it (DB cascade covers the logged ones).
+    const doomed = new Set<number>([row.uid, ...blocks[bi].rows.filter(r => r.parentUid === row.uid).map(r => r.uid)]);
+    if (restingUid !== null && doomed.has(restingUid)) skipRest();
+    setBlocks(prev => prev.map((b, i) => i !== bi ? b : { ...b, rows: b.rows.filter(r => !doomed.has(r.uid)) }));
     if (row.loggedId) {
       try {
         const res = await fetch(`/api/gym/${row.loggedId}`, { method: 'DELETE' });
@@ -396,6 +454,62 @@ export default function WorkoutSession({
         init();
       }
     }
+  }
+
+  // ── Swipe-left-to-add-drop-set gesture ──────────────────────────────────
+  // Pointer-based, kept in a ref so pointermove never re-renders (same
+  // approach as the habit rows). Horizontal-left drag past DROP_SWIPE_PX arms
+  // the action; release commits it. Vertical movement bails to native scroll.
+  const swipeRef = useRef<null | {
+    bi: number; ri: number;
+    startX: number; startY: number;
+    active: boolean; armed: boolean;
+    el: HTMLDivElement;
+  }>(null);
+  const DROP_SWIPE_PX = 64;
+
+  function onSetPointerDown(e: React.PointerEvent<HTMLDivElement>, bi: number, ri: number) {
+    // Don't hijack taps/typing on the row's inputs and buttons.
+    if ((e.target as HTMLElement).closest('input, button')) return;
+    swipeRef.current = { bi, ri, startX: e.clientX, startY: e.clientY, active: false, armed: false, el: e.currentTarget };
+  }
+
+  function onSetPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const s = swipeRef.current;
+    if (!s) return;
+    const dx = e.clientX - s.startX;
+    const dy = e.clientY - s.startY;
+    if (!s.active) {
+      if (dx < -10 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+        s.active = true;
+        s.el.setPointerCapture(e.pointerId);
+        s.el.classList.add('swiping');
+      } else if (Math.abs(dy) > 14 || dx > 14) {
+        swipeRef.current = null;
+        return;
+      } else {
+        return;
+      }
+    }
+    const offset = Math.max(-110, Math.min(0, dx));
+    s.el.style.transform = `translateX(${offset}px)`;
+    const armed = offset <= -DROP_SWIPE_PX;
+    if (armed !== s.armed) {
+      s.armed = armed;
+      s.el.classList.toggle('drop-armed', armed);
+      if (armed && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate(10); } catch { /* not all browsers honour vibrate */ }
+      }
+    }
+  }
+
+  function onSetPointerUp() {
+    const s = swipeRef.current;
+    if (!s) return;
+    s.el.style.transform = '';
+    s.el.classList.remove('swiping', 'drop-armed');
+    if (s.armed) addDropSet(s.bi, s.ri);
+    swipeRef.current = null;
   }
 
   async function addFreeExercise() {
@@ -606,8 +720,46 @@ export default function WorkoutSession({
           padding: 0 8px;
           border-radius: 10px;
           position: relative;
+          /* Swipe-left-to-drop-set: keep vertical scroll native, animate the
+             snap-back when the finger lifts. */
+          touch-action: pan-y;
+          transition: transform 200ms cubic-bezier(0.22,1,0.36,1);
         }
+        .ws-set.swiping { transition: none; }
         .ws-set + .ws-set { margin-top: 2px; }
+
+        /* "＋ DROP" hint parked just past the row's right edge — it rides
+           along as the row translates left, sliding into view. Hidden unless
+           a swipe is in progress so it can't cause horizontal overflow. */
+        .ws-set::after {
+          content: '＋ DROP';
+          position: absolute;
+          left: calc(100% + 10px);
+          top: 50%;
+          transform: translateY(-50%);
+          font-family: var(--font-mono);
+          font-size: 10px; font-weight: 700;
+          letter-spacing: 0.14em;
+          color: #F2C063;
+          padding: 6px 10px;
+          border-radius: 8px;
+          border: 1px solid rgba(242,192,99,0.25);
+          background: rgba(242,192,99,0.08);
+          white-space: nowrap;
+          pointer-events: none;
+          display: none;
+          opacity: 0.5;
+        }
+        .ws-set.swiping::after { display: block; }
+        .ws-set.drop-armed::after {
+          opacity: 1;
+          background: rgba(242,192,99,0.2);
+          border-color: rgba(242,192,99,0.5);
+        }
+
+        /* Drop set rows — indented under their parent, amber ↳ marker */
+        .ws-set.drop { margin-left: 28px; background: rgba(242,192,99,0.04); }
+        .ws-set.drop .ws-set-idx { color: #F2C063; font-size: 13px; }
         .ws-set.active {
           background: rgba(107,227,164,0.05);
         }
@@ -980,11 +1132,23 @@ export default function WorkoutSession({
             {block.rows.map((row, ri) => {
               const logged = !!row.loggedId || !!row.pending;
               const isActive = !logged && ri === activeIdx;
-              const canLog = !logged && !!row.reps && !!row.weight;
+              const isDrop = row.parentUid !== null;
+              // Drop sets can only be logged once the parent's save confirmed
+              // (needs its server id) — a sub-second wait in practice.
+              const parentLogged = !isDrop || !!block.rows.find(r => r.uid === row.parentUid)?.loggedId;
+              const canLog = !logged && !!row.reps && !!row.weight && parentLogged;
+              // Number only top-level sets; drops show the ↳ marker instead.
+              const mainIdx = block.rows.slice(0, ri + 1).filter(r => r.parentUid === null).length;
               return (
                 <Fragment key={row.uid}>
-                  <div className={`ws-set${logged ? ' logged' : isActive ? ' active' : ''}`}>
-                    <span className="ws-set-idx">{String(ri + 1).padStart(2, '0')}</span>
+                  <div
+                    className={`ws-set${logged ? ' logged' : isActive ? ' active' : ''}${isDrop ? ' drop' : ''}`}
+                    onPointerDown={e => onSetPointerDown(e, bi, ri)}
+                    onPointerMove={onSetPointerMove}
+                    onPointerUp={onSetPointerUp}
+                    onPointerCancel={onSetPointerUp}
+                  >
+                    <span className="ws-set-idx">{isDrop ? '↳' : String(mainIdx).padStart(2, '0')}</span>
                     {logged ? (
                       <span className="ws-set-num">{row.reps}</span>
                     ) : (

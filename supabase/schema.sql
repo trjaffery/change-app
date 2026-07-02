@@ -332,3 +332,9 @@ CREATE TABLE IF NOT EXISTS notification_log (
   UNIQUE(kind, key)
 );
 CREATE INDEX IF NOT EXISTS notification_log_sent_idx ON notification_log(sent_at DESC);
+
+-- Drop sets: a set performed immediately after its parent at reduced weight.
+-- parent_set_id links the drop to the set it follows; deleting the parent
+-- cascades to its drops. NULL = a normal (top-level) set.
+ALTER TABLE gym_sets ADD COLUMN IF NOT EXISTS parent_set_id UUID REFERENCES gym_sets(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS gym_sets_parent_idx ON gym_sets(parent_set_id);

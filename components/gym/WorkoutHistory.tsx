@@ -19,7 +19,19 @@ export interface ResumeRequest {
   dayLabel: string;
   baseElapsed: number;
 }
-interface SetRow { id: string; exercise: string; reps: number; weight: number }
+interface SetRow { id: string; exercise: string; reps: number; weight: number; parent_set_id?: string | null }
+
+// Order sets so each drop set renders right after its parent.
+function orderWithDrops(sets: SetRow[]): SetRow[] {
+  const out = sets.filter(s => !s.parent_set_id);
+  for (const d of sets.filter(s => s.parent_set_id)) {
+    let idx = out.findIndex(s => s.id === d.parent_set_id);
+    if (idx === -1) { out.push(d); continue; }
+    while (idx + 1 < out.length && out[idx + 1].parent_set_id === d.parent_set_id) idx++;
+    out.splice(idx + 1, 0, d);
+  }
+  return out;
+}
 interface SplitDay { day_of_week: number[] | null; name: string }
 interface Split { is_active: boolean; split_days: SplitDay[] }
 
@@ -237,11 +249,19 @@ export default function WorkoutHistory({ refreshKey, onResume }: { refreshKey: n
                         </span>
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {exSets.map((s, i) => (
-                          <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-secondary)' }}>
-                            {s.reps} × {s.weight} lbs
-                          </span>
-                        ))}
+                        {orderWithDrops(exSets).map(s => {
+                          const isDrop = !!s.parent_set_id;
+                          return (
+                            <span key={s.id} style={{
+                              fontFamily: 'var(--font-mono)', fontSize: 11, padding: '3px 8px', borderRadius: 6,
+                              background: isDrop ? 'rgba(242,192,99,0.07)' : 'rgba(255,255,255,0.05)',
+                              border: `1px solid ${isDrop ? 'rgba(242,192,99,0.25)' : 'rgba(255,255,255,0.08)'}`,
+                              color: isDrop ? '#F2C063' : 'var(--text-secondary)',
+                            }}>
+                              {isDrop ? '↳ ' : ''}{s.reps} × {s.weight} lbs
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                   );
